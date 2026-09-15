@@ -1,0 +1,16 @@
+// Edit the SDK template / generator if you need to change the shape.
+
+use fern_cli_sdk::app::CliApp;
+use fern_cli_sdk::openapi::OpenApiBinding;
+use fern_cli_sdk::auth::{BearerAuth};
+
+fn main() {
+    let app = CliApp::new("sikaru")
+        .auth(BearerAuth::new("bearerAuth").env("SIKARU_API_KEY"))
+        .binding(
+            OpenApiBinding::new()
+                .spec(include_str!("openapi0.json"))
+        );
+
+    app.run()
+}

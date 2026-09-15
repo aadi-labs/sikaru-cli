@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sikaru-compute"
+version = "0.1.0"
+description = "Customer-owned local compute for Sikaru runs"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+sikaru-compute = "sikaru_compute:main"
+
+[tool.setuptools.packages.find]
+include = ["sikaru_compute*"]

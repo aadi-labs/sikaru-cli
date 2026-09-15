@@ -1,0 +1,9 @@
+# Preserve authored project files during updates.
+
+client-extensions/**
+
+scripts/**
+
+tests/**
+
+.github/**
