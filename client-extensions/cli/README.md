@@ -9,7 +9,7 @@ results, and work with files and artifacts from scripts or your terminal.
 Install the latest release on macOS or Linux:
 
 ```sh
-curl -fsSL https://www.sikaru.ai/install.sh | sh
+curl -fsSL https://sikaru.ai/install.sh | sh
 ```
 
 Or install with npm (Node.js 20+, also supports Windows):
