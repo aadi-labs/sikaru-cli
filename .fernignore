@@ -7,3 +7,7 @@ scripts/**
 tests/**
 
 .github/**
+
+# Preserve release configuration and history.
+dist-workspace.toml
+CHANGELOG.md
