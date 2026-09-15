@@ -6,21 +6,21 @@ results, and work with files and artifacts from scripts or your terminal.
 
 ## Install
 
-macOS and Linux:
+Install or update to the latest release (Node.js 20+):
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aadi-labs/sikaru-cli/releases/download/v0.1.0/sikaru-cli-installer.sh | sh
+npm install -g sikaru-cli
+sikaru --help
 ```
 
-Windows PowerShell:
+Or run without a global installation:
 
-```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/aadi-labs/sikaru-cli/releases/download/v0.1.0/sikaru-cli-installer.ps1 | iex"
+```sh
+npx sikaru-cli@latest --help
 ```
 
-Prebuilt archives and checksums are available on the
-[releases page](https://github.com/aadi-labs/sikaru-cli/releases).
-The installer places `sikaru` in your Cargo bin directory (normally `~/.cargo/bin`).
+Standalone binaries and installers are available on the
+[releases page](https://github.com/aadi-labs/sikaru-cli/releases/latest).
 
 ## Build from source
 
