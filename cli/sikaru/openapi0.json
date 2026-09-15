@@ -3337,6 +3337,20 @@
             ],
             "title": "Job Id"
           },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Catalog model for this run. Omit to use the project default; list choices through model settings.",
+            "title": "Model"
+          },
           "policy": {
             "additionalProperties": true,
             "title": "Policy",
@@ -10862,6 +10876,64 @@
         "x-fern-retries": false,
         "x-fern-sdk-group-name": "runs",
         "x-fern-sdk-method-name": "submit_tool_result"
+      }
+    },
+    "/v1/projects/{project_id}/runs/{run_id}/trajectory": {
+      "get": {
+        "description": "Read retained ATIF structure and usage with private content redacted.\n\nThis is a committed snapshot and can be partial while a run is active or\ninterrupted. Messages, reasoning, tool payloads and provider metadata are\nomitted. No trajectory is synthesized when retained evidence is unavailable.",
+        "operationId": "runs_get_trajectory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Managed Run Trajectory V1 Projects  Project Id  Runs  Run Id  Trajectory Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Managed Run Trajectory",
+        "x-fern-sdk-group-name": "runs",
+        "x-fern-sdk-method-name": "get_trajectory"
       }
     },
     "/v1/projects/{project_id}/sessions/{session_id}": {

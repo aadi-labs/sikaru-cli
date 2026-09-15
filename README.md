@@ -4,14 +4,32 @@ Official command-line client for the Sikaru public API.
 Use it to manage agents and sessions, start runs, inspect events, submit tool
 results, and work with files and artifacts from scripts or your terminal.
 
-## Build
+## Install
+
+macOS and Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aadi-labs/sikaru-cli/releases/download/v0.1.0/sikaru-cli-installer.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/aadi-labs/sikaru-cli/releases/download/v0.1.0/sikaru-cli-installer.ps1 | iex"
+```
+
+Prebuilt archives and checksums are available on the
+[releases page](https://github.com/aadi-labs/sikaru-cli/releases).
+The installer places `sikaru` in your Cargo bin directory (normally `~/.cargo/bin`).
+
+## Build from source
 
 ```sh
 cargo build --locked --release
 ./target/release/sikaru --help
 ```
 
-Prebuilt installers have not been published. The CLI is a standalone Rust binary.
+The CLI is a standalone Rust binary.
 
 ## Use
 
@@ -52,7 +70,7 @@ Install the generated `sikaru` binary and this companion (Python 3.11+, macOS or
 Linux):
 
 ```sh
-pipx install ./client-extensions/cli
+pipx install "git+https://github.com/aadi-labs/sikaru-cli.git@v0.1.0#subdirectory=client-extensions/cli"
 sikaru-compute --project-id PROJECT --run-id RUN --provider-id PROVIDER \
   --workspace /absolute/path/to/workspace --state-dir /absolute/path/to/new-run-state
 ```

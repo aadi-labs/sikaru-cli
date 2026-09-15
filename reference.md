@@ -1333,6 +1333,21 @@ Managed Run Summary
 | `--project-id` | `string` | Yes |  |
 | `--run-id` | `string` | Yes |  |
 
+#### `sikaru runs get-trajectory`
+
+Read retained ATIF structure and usage with private content redacted.
+
+This is a committed snapshot and can be partial while a run is active or
+interrupted. Messages, reasoning, tool payloads and provider metadata are
+omitted. No trajectory is synthesized when retained evidence is unavailable.
+
+`GET /v1/projects/{project_id}/runs/{run_id}/trajectory`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--run-id` | `string` | Yes |  |
+
 #### `sikaru runs pending-actions`
 
 Pending Actions
