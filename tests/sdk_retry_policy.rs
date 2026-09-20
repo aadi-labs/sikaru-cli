@@ -1,37 +1,54 @@
-use fern_cli_sdk::auth::no_auth_provider;
-use fern_cli_sdk::http::HttpConfig;
-use fern_cli_sdk::openapi::discovery::RetriesConfig;
-use fern_cli_sdk::sdk_executor::{CliExecutor, SdkRequestExecutor};
+use std::process::Command;
+use wiremock::{
+    matchers::{header, method, path},
+    Mock, MockServer, ResponseTemplate,
+};
 
-#[tokio::test]
-async fn mutations_are_not_replayed_even_with_an_idempotency_header() {
-    for method in ["POST", "PUT", "PATCH", "DELETE"] {
-        let server = wiremock::MockServer::start().await;
-        wiremock::Mock::given(wiremock::matchers::method(method))
-            .respond_with(wiremock::ResponseTemplate::new(503))
-            .expect(1)
-            .mount(&server)
-            .await;
-        let executor = CliExecutor::new(
-            HttpConfig::new("sikaru").unwrap(),
-            no_auth_provider(),
-            vec![],
-            None,
-        )
-        .with_retries(RetriesConfig {
-            enabled: true,
-            max_attempts: 3,
-            base_delay_ms: 1,
-            factor: 1.0,
-            jitter: 0.0,
-        });
-        let request = reqwest::Client::new()
-            .request(method.parse().unwrap(), server.uri())
-            .header("Idempotency-Key", "server-does-not-guarantee-deduplication")
-            .body("{}")
-            .build()
-            .unwrap();
-        let _ = executor.execute(request).await;
-        assert_eq!(server.received_requests().await.unwrap().len(), 1, "{method}");
-    }
+// Exercise the shipped command and its embedded contract: a header alone must
+// not override the endpoint's x-fern-retries.disabled policy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mutation_endpoint_is_not_replayed_even_with_an_idempotency_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/projects/project/workflows/workflow/runs"))
+        .and(header("Idempotency-Key", "retry-regression"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let url = server.uri();
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_sikaru"))
+            .args([
+                "workflows",
+                "start_project_workflow_run",
+                "--project-id",
+                "project",
+                "--workflow-id",
+                "workflow",
+                "--input",
+                "{}",
+                "--idempotency-key",
+                "retry-regression",
+                "--base-url",
+                &url,
+                "--format",
+                "json",
+            ])
+            .env("SIKARU_API_KEY", "test-only")
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(
+        !output.status.success(),
+        "503 must be reported as a failure"
+    );
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        1,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

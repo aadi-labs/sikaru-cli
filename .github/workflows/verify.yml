@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: cargo test --locked --bin sikaru --test sdk_retry_policy
+      - run: cargo test --locked --bin sikaru --test sdk_retry_policy --test auto_improve --test event_stream --test execution_environment
       - run: cargo build --locked --bin sikaru
       - run: node scripts/check-cli.mjs target/debug/sikaru
       - name: Verify local compute and generated CLI transport
@@ -31,3 +31,10 @@ jobs:
         run: |
           python -m pip install --no-deps ./client-extensions/cli
           sikaru-compute --help
+      - name: Verify authoring companion
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo test --locked --manifest-path client-extensions/authoring/Cargo.toml
+          cargo install --locked --debug --path client-extensions/authoring
+          sikaru-authoring --help

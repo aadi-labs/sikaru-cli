@@ -114,3 +114,82 @@ cargo build --locked --bin sikaru
 node scripts/check-cli.mjs target/debug/sikaru
 SIKARU_TEST_CLI="$PWD/target/debug/sikaru" python3 -m unittest discover -s tests -p test_local_compute.py
 ```
+
+## Automatic harness improvement
+
+Add `--auto-improve true` when starting a run:
+
+```sh
+sikaru runs start --project-id PROJECT --harness-id AGENT \
+  --tenant-id TENANT --user-id USER --input '{"goal":"Complete the task"}' \
+  --product-context '{}' --policy '{}' --auto-improve true
+```
+
+Or enable it for the turns of a new session:
+
+```sh
+sikaru execution-sessions create --project-id PROJECT --harness-id AGENT \
+  --tenant-id TENANT --user-id USER --auto-improve true
+```
+
+The default is off; `--auto-improve false` explicitly disables it at startup.
+This requires `runs:create`, `harness:write`, and an agent configured for
+improvement. Completed turns trigger background improvement after their evidence
+is graded and the configured evaluation cases are ready. Work continues when the
+CLI exits. Improvement uses additional model and evaluation compute.
+
+Only evaluated improvements can become active. Running sessions keep their
+pinned release; start a new session to use an approved release. A job requiring
+review pauses further automatic campaigns for that agent. Inspect progress with:
+
+```sh
+sikaru harnesses list_improvements --project-id PROJECT --harness-id AGENT
+```
+
+The service must support automatic improvement and have its learning worker
+enabled. This flag does not run an optimizer on your computer.
+
+### Author an agent
+
+Install the authored companion separately: `cargo install --path client-extensions/authoring --locked`.
+The generated `sikaru` binary contains only API commands.
+
+```sh
+sikaru-authoring init my-agent --name my-agent
+# Edit my-agent/instructions.md and explicitly list any additional sources.
+sikaru-authoring check my-agent
+sikaru-authoring dev my-agent --project PROJECT_ID --tenant TENANT_ID --user USER_ID --prompt 'Hello'
+```
+
+`init` creates a new directory and never overwrites an existing directory.
+`check` reads only the files listed in `sikaru.json`, prints the customer definition
+and its canonical SHA-256 digest, and makes no API request. Keep sensitive files
+out of the source manifest. Paths must be relative; source paths cannot contain
+symlinks. The complete definition is limited to 1 MB and 100 files.
+
+```json
+{
+  "name": "my-agent",
+  "sources": [
+    {"path": "instructions.md", "kind": "agent_md"},
+    {"path": "skills/research/SKILL.md", "kind": "agent_skill"},
+    {"path": "skills/research/assets/input.csv", "kind": "skill_asset"},
+    {"path": "evals/acceptance.md", "kind": "eval_md"}
+  ]
+}
+```
+
+Source instructions and skills are Markdown. Skill assets under `scripts/`,
+`references/`, or `assets/` are encoded as base64 and require their package's
+`SKILL.md` in the manifest. Named agents use `agents/NAME/instructions.md` and
+`agents/NAME/skills/...`. The manifest contains customer-authored source only.
+
+`dev` creates an inactive draft and a hosted session explicitly bound to the draft
+environment. It uses the same generated API executor, credentials and base URL as
+other commands. A short source digest is appended to the draft slug; editing
+source creates a separate immutable draft. Repeating unchanged source reuses that
+draft and creates a new session. The optional prompt queues one turn and returns
+its IDs; this command does not wait for completion or start an interactive chat.
+Use the execution-session and run commands to follow or continue the session.
+Draft testing requires the server's draft execution API and appropriate project
+permissions. This workflow does not activate a production release.

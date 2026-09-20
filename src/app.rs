@@ -1606,11 +1606,11 @@ fn global_flags() -> Vec<serde_json::Value> {
         }),
         serde_json::json!({
             "flag": "--no-retry",
-            "description": "Disable retries on this operation, including network errors",
+            "description": "Disable retries declared by x-fern-retries on this operation, including network errors",
         }),
         serde_json::json!({
             "flag": "--no-extract",
-            "description": "Print the full response body without extracting a return value",
+            "description": "Disable x-fern-sdk-return-value extraction and print the full response body",
         }),
         serde_json::json!({
             "flag": "--help",

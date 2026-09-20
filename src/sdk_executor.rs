@@ -214,7 +214,7 @@ impl CliExecutor {
                         &self.retries,
                         &http_method_str,
                         carries_idempotency_key,
-                        !matches!(http_method_str.as_str(), "GET" | "HEAD"),
+                        false,
                     ) {
                         retry_attempt += 1;
                         tokio::time::sleep(delay).await;
@@ -233,7 +233,7 @@ impl CliExecutor {
                         &self.retries,
                         &http_method_str,
                         carries_idempotency_key,
-                        !matches!(http_method_str.as_str(), "GET" | "HEAD"),
+                        false,
                     ) {
                         retry_attempt += 1;
                         tokio::time::sleep(delay).await;

@@ -5,9 +5,11 @@ Full command reference for `sikaru`.
 ## Commands
 
 - [`sikaru activation`](#sikaru-activation)
+- [`sikaru agent-budgets`](#sikaru-agent-budgets)
 - [`sikaru agent-imports`](#sikaru-agent-imports)
 - [`sikaru agents`](#sikaru-agents)
 - [`sikaru changesets`](#sikaru-changesets)
+- [`sikaru connections`](#sikaru-connections)
 - [`sikaru context-registry`](#sikaru-context-registry)
 - [`sikaru conversations`](#sikaru-conversations)
 - [`sikaru deployments`](#sikaru-deployments)
@@ -39,6 +41,7 @@ Full command reference for `sikaru`.
 - [`sikaru run-webhooks`](#sikaru-run-webhooks)
 - [`sikaru runs`](#sikaru-runs)
 - [`sikaru sessions`](#sikaru-sessions)
+- [`sikaru specialists`](#sikaru-specialists)
 - [`sikaru tool-providers`](#sikaru-tool-providers)
 - [`sikaru trace-import-connections`](#sikaru-trace-import-connections)
 - [`sikaru trace-imports`](#sikaru-trace-imports)
@@ -60,6 +63,57 @@ Project Activation Status
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
+
+---
+
+### `sikaru agent-budgets`
+
+#### `sikaru agent-budgets add`
+
+Add Budget
+
+`POST /v1/projects/{project_id}/harnesses/{harness_id}/budget/funding`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-budgets configure-auto-reload`
+
+Configure Reload
+
+`PUT /v1/projects/{project_id}/harnesses/{harness_id}/budget/auto-reload`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-budgets get`
+
+Get Budget
+
+`GET /v1/projects/{project_id}/harnesses/{harness_id}/budget`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
+
+#### `sikaru agent-budgets setup-payment-method`
+
+Setup Payment
+
+`POST /v1/projects/{project_id}/harnesses/{harness_id}/budget/payment-method`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---
 
@@ -220,6 +274,156 @@ Stage Changeset
 | `--project-id` | `string` | Yes |  |
 | `--changeset-id` | `string` | Yes |  |
 | `--json` | `JSON` | No | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru connections`
+
+#### `sikaru connections authorize`
+
+Authorize
+
+`POST /v1/projects/{project_id}/connections/{connection_id}/authorize`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections complete`
+
+Complete
+
+`POST /v1/projects/{project_id}/connections/{connection_id}/complete`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru connections create-connection`
+
+Create Connection
+
+`POST /v1/projects/{project_id}/connections`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru connections credentials`
+
+Credentials
+
+`PUT /v1/projects/{project_id}/connections/{connection_id}/credentials`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru connections disable`
+
+Disable
+
+`POST /v1/projects/{project_id}/connections/{connection_id}/disable`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections disconnect`
+
+Disconnect
+
+`POST /v1/projects/{project_id}/connections/{connection_id}/disconnect`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections discover`
+
+Discover
+
+`POST /v1/projects/{project_id}/connections/{connection_id}/discover`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections enable`
+
+Enable
+
+`POST /v1/projects/{project_id}/connections/{connection_id}/enable`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections events`
+
+Events
+
+`GET /v1/projects/{project_id}/connections/{connection_id}/events`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections get-connection`
+
+Get Connection
+
+`GET /v1/projects/{project_id}/connections/{connection_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections grant`
+
+Grant
+
+`POST /v1/projects/{project_id}/connections/{connection_id}/grants`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru connections list-connections`
+
+List Connections
+
+`GET /v1/projects/{project_id}/connections`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections revoke-grant`
+
+Revoke Grant
+
+`DELETE /v1/projects/{project_id}/connections/{connection_id}/grants/{grant_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--grant-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
 
 ---
 
@@ -662,6 +866,17 @@ List Session Inputs
 | `--project-id` | `string` | Yes |  |
 | `--session-id` | `string` | Yes |  |
 
+#### `sikaru execution-sessions spend`
+
+Session Spend
+
+`GET /v1/projects/{project_id}/execution-sessions/{session_id}/spend`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--session-id` | `string` | Yes |  |
+
 #### `sikaru execution-sessions upload-file`
 
 Upload File
@@ -958,7 +1173,12 @@ List Issue Clusters
 
 #### `sikaru issue-clusters mine-project-issue-clusters`
 
-Mine Project Issue Clusters
+Run one failure-analysis agent pass over the project's recent traces.
+
+This is a model-latency operation on a request path: the endpoint is sync so
+the harness runs in the threadpool, and a project may only have one pass in
+flight. A background job queue is the long-term home for this work; the
+in-flight guard below is the interim bound.
 
 `POST /v1/projects/{project_id}/issue-clusters/mine`
 
@@ -1243,6 +1463,19 @@ Pause Schedule
 | `--schedule-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
+#### `sikaru run-schedules schedule-history`
+
+Schedule History
+
+`GET /v1/projects/{project_id}/run-schedules/{schedule_id}/occurrences`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--schedule-id` | `string` | Yes |  |
+| `--before` | `string` | No |  |
+| `--limit` | `integer` | No |  |
+
 ---
 
 ### `sikaru run-webhooks`
@@ -1319,7 +1552,6 @@ Managed Run Events
 | `--run-id` | `string` | Yes |  |
 | `--after` | `string` | No |  |
 | `--limit` | `string` | No |  |
-| `--stream` | `string` | No |  |
 | `--last-event-id` | `string` | No |  |
 
 #### `sikaru runs get`
@@ -1382,6 +1614,22 @@ Start Managed Harness Run
 | `--project-id` | `string` | Yes |  |
 | `--harness-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru runs stream-events`
+
+Replay and stream durable run events; resume using after or Last-Event-ID.
+
+A terminal run event ends the stream. Idle streams may also close: callers
+can resume from their last delivered event without restarting the run.
+
+`GET /v1/projects/{project_id}/runs/{run_id}/events/stream`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--run-id` | `string` | Yes |  |
+| `--after` | `string` | No |  |
+| `--last-event-id` | `string` | No |  |
 
 #### `sikaru runs submit-tool-result`
 
@@ -1480,6 +1728,59 @@ Start Managed Sandbox Execution
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--session-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru specialists`
+
+#### `sikaru specialists cancel`
+
+Cancel Specialist
+
+`POST /v1/projects/{project_id}/execution-sessions/{session_id}/specialists/{thread_id}/cancel`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--session-id` | `string` | Yes |  |
+| `--thread-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru specialists get`
+
+Get Specialist
+
+`GET /v1/projects/{project_id}/execution-sessions/{session_id}/specialists/{thread_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--session-id` | `string` | Yes |  |
+| `--thread-id` | `string` | Yes |  |
+
+#### `sikaru specialists list`
+
+List Specialists
+
+`GET /v1/projects/{project_id}/execution-sessions/{session_id}/specialists`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--session-id` | `string` | Yes |  |
+
+#### `sikaru specialists message`
+
+Message Specialist
+
+`POST /v1/projects/{project_id}/execution-sessions/{session_id}/specialists/{thread_id}/messages`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--session-id` | `string` | Yes |  |
+| `--thread-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---

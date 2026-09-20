@@ -16,7 +16,7 @@ function run(args) {
   return result.stdout;
 }
 const help = run(["--help"]);
-for (const command of ["agents", "execution-sessions", "runs", "tool-providers"]) {
+for (const command of ["agents", "execution-sessions", "runs", "tool-providers", "agent-budgets", "specialists"]) {
   assert.ok(help.includes(command));
   assert.match(run([command, "--help"]), /Commands:/);
 }
@@ -25,4 +25,16 @@ assert.doesNotThrow(() => JSON.parse(run(["runs", "start", "--schema"])));
 const preview = run(["runs", "get", "--project-id", "project_example", "--run-id", "run_example", "--base-url", "http://127.0.0.1:1", "--dry-run", "--format", "json"]);
 assert.ok(preview.includes("project_example"));
 assert.ok(preview.includes("run_example"));
+for (const [resource, methods] of Object.entries({
+  "agent-budgets": ["get", "add", "configure_auto_reload", "setup_payment_method"],
+  "specialists": ["list", "get", "message", "cancel"],
+  "execution-sessions": ["spend"],
+})) {
+  for (const method of methods) {
+    assert.doesNotThrow(() => JSON.parse(run([resource, method, "--schema"])));
+  }
+}
+const funding = run(["agent-budgets", "add", "--project-id", "project_example", "--harness-id", "agent_example",
+  "--amount-usd", "5.00", "--idempotency-key", "local-funding-check", "--base-url", "http://127.0.0.1:1", "--dry-run", "--format", "json"]);
+assert.ok(funding.includes("local-funding-check"));
 console.log("Public API help, operation schema, and offline request validation passed.");

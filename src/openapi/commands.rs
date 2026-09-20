@@ -707,7 +707,7 @@ fn build_resource_command(
                 Arg::new("no-extract")
                     .long("no-extract")
                     .help(
-                        "Print the full response body without extracting a return value",
+                        "Disable x-fern-sdk-return-value extraction and print the full response body",
                     )
                     .action(clap::ArgAction::SetTrue),
             )
