@@ -37,4 +37,9 @@ for (const [resource, methods] of Object.entries({
 const funding = run(["agent-budgets", "add", "--project-id", "project_example", "--harness-id", "agent_example",
   "--amount-usd", "5.00", "--idempotency-key", "local-funding-check", "--base-url", "http://127.0.0.1:1", "--dry-run", "--format", "json"]);
 assert.ok(funding.includes("local-funding-check"));
+if (process.platform !== "win32") {
+  assert.match(run(["exec", "--help"]), /--resume/);
+  assert.match(run(["compute", "serve", "--help"]), /--bootstrap/);
+  assert.match(run(["compute", "worker", "--help"]), /--launcher/);
+}
 console.log("Public API help, operation schema, and offline request validation passed.");

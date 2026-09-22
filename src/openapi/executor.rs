@@ -593,6 +593,30 @@ fn ancestor_object_shorthand_supplied(
     false
 }
 
+/// Required descendants only become inputs when their optional object is supplied.
+/// Complete body validation below still enforces the schema on provided objects.
+fn optional_body_ancestor_omitted(
+    leaf_path: &str,
+    supplied: &Map<String, Value>,
+    parameters: &HashMap<String, MethodParameter>,
+) -> bool {
+    let mut path = leaf_path;
+    while let Some((ancestor, _)) = path.rsplit_once('.') {
+        if parameters.get(ancestor).is_some_and(|parameter| {
+            parameter.param_type.as_deref() == Some("object") && !parameter.required_by_spec
+        }) && !object_input_supplied(ancestor, supplied) {
+            return true;
+        }
+        path = ancestor;
+    }
+    false
+}
+
+fn object_input_supplied(ancestor: &str, supplied: &Map<String, Value>) -> bool {
+    let prefix = format!("{ancestor}.");
+    supplied.keys().any(|key| key == ancestor || key.starts_with(&prefix))
+}
+
 /// Parsed and validated inputs ready for request execution.
 #[derive(Debug)]
 struct ExecutionInput {
@@ -667,6 +691,11 @@ fn parse_and_validate_inputs(
             && !params.contains_key(param_name)
             && !global_param_targets.contains(param_name.as_str())
         {
+            if param_def.location.as_deref() == Some("body")
+                && optional_body_ancestor_omitted(param_name, &params, &method.parameters)
+            {
+                continue;
+            }
             // When --json is provided, body-located required params are satisfied
             // by the JSON payload — skip their individual-flag validation.
             if param_def.location.as_deref() == Some("body") && body_json.is_some() {

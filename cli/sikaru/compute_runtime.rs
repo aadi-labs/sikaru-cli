@@ -1,0 +1,437 @@
+//! Executor lifecycle: local authority and durable effects precede network receipts.
+use super::{
+    config::Bootstrap,
+    journal::{Binding, Journal},
+    process::Processes,
+    transport::{maintain_lease, Transport},
+};
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use sikaru_sdk::api::*;
+use std::{sync::Arc, time::Duration};
+use tokio::{sync::watch, time::Instant};
+
+pub async fn serve(b: Bootstrap, base_url: String, http: reqwest::Client) -> Result<Value> {
+    serve_with_options(b, base_url, http, RunOptions::default()).await
+}
+#[derive(Default)]
+pub struct RunOptions {
+    pub approval_wait: Duration,
+    pub timeout: Option<Duration>,
+    pub stop: Option<watch::Receiver<bool>>,
+    pub admission: Option<watch::Receiver<bool>>,
+}
+pub async fn serve_with_options(
+    b: Bootstrap,
+    base_url: String,
+    http: reqwest::Client,
+    options: RunOptions,
+) -> Result<Value> {
+    let binding = Binding::from_bootstrap(&b)?;
+    let instance = format!("{:032x}", rand::random::<u128>());
+    let transport = Transport::new(&b, base_url, http, binding.clone())?;
+    let startup = Instant::now() + Duration::from_secs(180);
+    let current = transport.status(startup).await?;
+    transport.validate(&current)?;
+    // A scoped credential for a higher claimed epoch is backend proof that prior teardown was accepted.
+    let mut journal = Journal::open_verified(&b.state_dir, binding, instance, true)?;
+    let mut processes = Processes::new(&journal, Duration::from_secs(b.command_timeout_seconds));
+    let preparation = prepare(&transport, &mut journal, &processes, startup).await;
+    let outcome = match preparation {
+        Ok(deadline) => {
+            eprintln!(
+                "{}",
+                json!({"event":"executor_ready","attachment_id":b.attachment_id,"session_id":b.session_id})
+            );
+            run(
+                transport.clone(),
+                &mut journal,
+                &mut processes,
+                deadline,
+                options,
+            )
+            .await
+        }
+        Err(_) => Err(anyhow::anyhow!(
+            "recovery_required: executor could not establish original authority"
+        )),
+    };
+    finish(outcome, &transport, &mut journal, &mut processes).await
+}
+async fn prepare(
+    transport: &Transport,
+    journal: &mut Journal,
+    processes: &Processes,
+    deadline: Instant,
+) -> Result<Instant> {
+    let a = transport.status(deadline).await?;
+    transport.validate(&a)?;
+    transport.connect(&journal.instance, deadline).await?;
+    reconcile(transport, journal, processes, deadline).await?;
+    journal.verify()?;
+    transport.ready(&journal.instance, deadline).await
+}
+async fn reconcile(
+    transport: &Transport,
+    journal: &mut Journal,
+    processes: &Processes,
+    deadline: Instant,
+) -> Result<()> {
+    let page = transport.poll(deadline).await?;
+    transport.validate(&page.attachment)?;
+    let uncertain = uncertain_operations(&page, journal)?;
+    replay_receipts(transport, journal, deadline).await?;
+    let observations = page
+        .live_handles
+        .iter()
+        .map(|h| processes.observation(&h.handle_id))
+        .collect::<Vec<_>>();
+    let lost = observations
+        .iter()
+        .any(|o| o.status == ProcessObservationStatus::Lost);
+    let body = ReconcileInput {
+        executor_instance_id: journal.instance.clone(),
+        journal_id: journal.binding.journal_id.clone(),
+        workspace_provenance: journal.binding.workspace_provenance.clone(),
+        receipts: Some(vec![]),
+        processes: Some(observations),
+        uncertain_operation_ids: Some(uncertain.clone()),
+    };
+    let response = transport.reconcile(&body, deadline).await?;
+    transport.validate(&response.attachment)?;
+    if lost || !uncertain.is_empty() {
+        bail!("recovery_required: uncertain effects or lost process ownership");
+    }
+    Ok(())
+}
+fn uncertain_operations(page: &WorkPage, journal: &Journal) -> Result<Vec<String>> {
+    let mut uncertain = Vec::new();
+    for issued in &page.issued_operations {
+        let key = format!("{}/{}", issued.run_id, issued.tool_call_id);
+        match journal.entries.get(&key).and_then(|e| e.receipt.as_ref()) {
+            None => uncertain.push(issued.tool_call_id.clone()),
+            Some(receipt) => {
+                if receipt["request_digest"] != issued.request_digest {
+                    bail!("issued operation identity changed");
+                }
+            }
+        }
+    }
+    Ok(uncertain)
+}
+async fn replay_receipts(
+    transport: &Transport,
+    journal: &mut Journal,
+    deadline: Instant,
+) -> Result<()> {
+    let pending = journal
+        .entries
+        .iter()
+        .filter(|(_, e)| !e.acknowledged)
+        .filter_map(|(k, e)| e.receipt.clone().map(|r| (k.clone(), r)))
+        .collect::<Vec<_>>();
+    for (key, value) in pending {
+        let receipt: ReceiptInput = serde_json::from_value(value)?;
+        transport.submit(&receipt, deadline).await?;
+        journal.ack(&key)?;
+    }
+    Ok(())
+}
+async fn run(
+    transport: Arc<Transport>,
+    journal: &mut Journal,
+    processes: &mut Processes,
+    deadline: Instant,
+    mut options: RunOptions,
+) -> Result<Value> {
+    let (lease, receiver) = watch::channel(deadline);
+    let heartbeat = maintain_lease(transport.clone(), lease);
+    tokio::pin!(heartbeat);
+    let admission = options.admission.take();
+    let approval_wait = options.approval_wait;
+    tokio::select! {
+        biased;
+        _=termination_signal()=>Ok(json!({"status":"cancelled","reason":"signal","execution":null})),
+        _=stop_requested(&mut options.stop)=>Ok(json!({"status":"cancelled","reason":"controller_stopped","execution":null})),
+        _=run_deadline(options.timeout)=>Ok(json!({"status":"cancelled","reason":"deadline","execution":null})),
+        result=&mut heartbeat=>{result?;bail!("lease_expired")},
+        result=async {await_admission(admission).await?;work_loop(&transport,journal,processes,receiver,approval_wait).await}=>result,
+    }
+}
+async fn work_loop(
+    transport: &Transport,
+    journal: &mut Journal,
+    processes: &mut Processes,
+    lease: watch::Receiver<Instant>,
+    approval_wait: Duration,
+) -> Result<Value> {
+    let mut approval_deadline = None;
+    loop {
+        ensure_lease(&lease)?;
+        processes.maintenance(journal)?;
+        let deadline = *lease.borrow();
+        let page = match transport.poll(deadline).await {
+            Ok(page) => page,
+            Err(_) => {
+                reconnect(transport, journal, processes, &lease).await?;
+                continue;
+            }
+        };
+        transport.validate(&page.attachment)?;
+        if let Some(result) = completion_after_wait(&page, approval_wait, &mut approval_deadline) {
+            return Ok(result);
+        }
+        let idle = page.operations.is_empty();
+        let delay = Duration::from_secs(page.poll_after_seconds.unwrap_or(1).clamp(1, 5) as u64);
+        for op in page.operations {
+            dispatch(transport, journal, processes, &lease, op).await?;
+        }
+        if idle {
+            let waiting_approval = page
+                .execution
+                .as_ref()
+                .is_some_and(|run| run.approval_required);
+            idle_wait(delay, approval_deadline.filter(|_| waiting_approval)).await;
+        }
+    }
+}
+async fn idle_wait(delay: Duration, approval_deadline: Option<Instant>) {
+    let wake = Instant::now() + delay;
+    tokio::time::sleep_until(approval_deadline.map_or(wake, |deadline| deadline.min(wake))).await;
+}
+fn completion(page: &WorkPage) -> Option<Value> {
+    match page.attachment.status {
+        AttachmentViewStatus::Stopping => {
+            return Some(json!({"status":"cancelled","execution":page.execution}))
+        }
+        AttachmentViewStatus::RecoveryRequired => {
+            return Some(json!({"status":"recovery_required","execution":page.execution}))
+        }
+        _ => {}
+    }
+    let execution = page.execution.as_ref()?;
+    if execution.approval_required {
+        return Some(json!({"status":"approval_required","execution":execution}));
+    }
+    if execution.terminal {
+        return Some(json!({"status":execution.status,"execution":execution}));
+    }
+    None
+}
+async fn reconnect(
+    transport: &Transport,
+    journal: &mut Journal,
+    processes: &Processes,
+    lease: &watch::Receiver<Instant>,
+) -> Result<()> {
+    ensure_lease(lease)?;
+    let deadline = *lease.borrow();
+    transport.connect(&journal.instance, deadline).await?;
+    let deadline = *lease.borrow();
+    reconcile(transport, journal, processes, deadline).await?;
+    // Ready renews; keep the older local lease until heartbeat independently renews.
+    let deadline = *lease.borrow();
+    transport.ready(&journal.instance, deadline).await?;
+    Ok(())
+}
+async fn dispatch(
+    transport: &Transport,
+    journal: &mut Journal,
+    processes: &mut Processes,
+    lease: &watch::Receiver<Instant>,
+    op: OperationView,
+) -> Result<()> {
+    ensure_lease(lease)?;
+    validate_operation(&op, &journal.binding)?;
+    let key = format!("{}/{}", op.run_id, op.tool_call_id);
+    let receipt: ReceiptInput = match journal.intent(&key, serde_json::to_value(&op)?)? {
+        Some(receipt) => serde_json::from_value(receipt)?,
+        None => execute_operation(&op, &key, journal, processes, lease).await?,
+    };
+    deliver_receipt(transport, journal, lease, &key, &receipt).await
+}
+async fn execute_operation(
+    op: &OperationView,
+    key: &str,
+    journal: &mut Journal,
+    processes: &mut Processes,
+    lease: &watch::Receiver<Instant>,
+) -> Result<ReceiptInput> {
+    let method = serde_json::to_value(&op.method)?;
+    let effect = processes.execute(
+        method.as_str().context("invalid method")?,
+        &op.arguments,
+        journal,
+    );
+    let result = tokio::select! {result=effect=>result,_=lease_expiry(lease.clone())=>bail!("lease_expired")};
+    let receipt = make_receipt(op, result)?;
+    journal.receipt(key, serde_json::to_value(&receipt)?)?;
+    Ok(receipt)
+}
+async fn deliver_receipt(
+    transport: &Transport,
+    journal: &mut Journal,
+    lease: &watch::Receiver<Instant>,
+    key: &str,
+    receipt: &ReceiptInput,
+) -> Result<()> {
+    for _ in 0..3 {
+        ensure_lease(lease)?;
+        let deadline = *lease.borrow();
+        if transport.submit(&receipt, deadline).await.is_ok() {
+            journal.ack(&key)?;
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    bail!("receipt_delivery_failed: immutable receipt retained")
+}
+fn make_receipt(op: &OperationView, result: Result<Value>) -> Result<ReceiptInput> {
+    let (status, payload) = match result {
+        Ok(v) => (ReceiptInputStatus::Completed, v),
+        Err(_) => (
+            ReceiptInputStatus::Failed,
+            json!({"error":"native task IO failed"}),
+        ),
+    };
+    Ok(ReceiptInput {
+        run_id: op.run_id.clone(),
+        tool_call_id: op.tool_call_id.clone(),
+        tool_provider_id: op.tool_provider_id.clone(),
+        capability_name: Some(ReceiptInputCapabilityName::ComputeExecute),
+        request_digest: op.request_digest.clone(),
+        idempotency_key: format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&[&op.run_id, &op.tool_call_id])?)
+        ),
+        status,
+        payload: serde_json::from_value(payload)?,
+    })
+}
+fn validate_operation(op: &OperationView, b: &Binding) -> Result<()> {
+    if op.owner_epoch != b.owner_epoch || op.workspace_generation != b.workspace_generation {
+        bail!("stale operation authority");
+    }
+    if op.capability_name != OperationViewCapabilityName::ComputeExecute
+        || op.request_digest.is_empty()
+        || op.run_id.is_empty()
+        || op.tool_call_id.is_empty()
+    {
+        bail!("invalid admitted operation identity");
+    }
+    Ok(())
+}
+fn ensure_lease(lease: &watch::Receiver<Instant>) -> Result<()> {
+    if Instant::now() >= *lease.borrow() {
+        bail!("lease_expired");
+    }
+    Ok(())
+}
+async fn lease_expiry(mut lease: watch::Receiver<Instant>) {
+    loop {
+        let deadline = *lease.borrow_and_update();
+        tokio::select! {_=tokio::time::sleep_until(deadline)=>return,result=lease.changed()=>{if result.is_err(){return;}}}
+    }
+}
+async fn finish(
+    outcome: Result<Value>,
+    transport: &Transport,
+    journal: &mut Journal,
+    processes: &mut Processes,
+) -> Result<Value> {
+    let cleanup = processes.cleanup(journal);
+    if let Err(error) = &cleanup {
+        eprintln!("native process cleanup failed: {error}");
+    }
+    let local_clean = cleanup.is_ok();
+    let mut result = outcome.unwrap_or_else(
+        |error| json!({"status":"recovery_required","reason":error.to_string(),"execution":null}),
+    );
+    let cancellation = result["status"] == "cancelled";
+    let cancel_ack = if cancellation {
+        Some(transport.stop().await)
+    } else {
+        None
+    };
+    if journal.has_uncertain_effects() {
+        result["status"] = json!("recovery_required");
+        result["reason"] = json!("interrupted_operation_requires_reconciliation");
+    }
+    let remote_clean = transport.cleanup(local_clean).await;
+    if local_clean && remote_clean && !journal.has_uncertain_effects() {
+        journal.mark_clean()?;
+    }
+    Ok(cleanup_outcome(
+        result,
+        local_clean,
+        remote_clean,
+        cancel_ack,
+    ))
+}
+fn cleanup_outcome(
+    mut result: Value,
+    local_clean: bool,
+    remote_clean: bool,
+    cancel_ack: Option<bool>,
+) -> Value {
+    result["cleanup"] = json!(if local_clean && remote_clean {
+        "confirmed"
+    } else {
+        "unconfirmed"
+    });
+    if !local_clean || !remote_clean {
+        result["status"] = json!("recovery_required");
+    }
+    result["cancel_acknowledged"] = json!(cancel_ack);
+    result["usage"] = json!({"available":false});
+    result
+}
+pub(crate) async fn termination_signal() {
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("SIGTERM handler");
+    tokio::select! {_=tokio::signal::ctrl_c()=>{},_=term.recv()=>{}}
+}
+
+fn completion_after_wait(
+    page: &WorkPage,
+    wait: Duration,
+    deadline: &mut Option<Instant>,
+) -> Option<Value> {
+    let result = completion(page)?;
+    if result["status"] != "approval_required" {
+        return Some(result);
+    }
+    let end = deadline.get_or_insert_with(|| Instant::now() + wait);
+    (Instant::now() >= *end).then_some(result)
+}
+async fn stop_requested(stop: &mut Option<watch::Receiver<bool>>) {
+    match stop {
+        Some(receiver) => {
+            while !*receiver.borrow_and_update() {
+                if receiver.changed().await.is_err() {
+                    return;
+                }
+            }
+        }
+        None => std::future::pending::<()>().await,
+    }
+}
+async fn run_deadline(timeout: Option<Duration>) {
+    match timeout {
+        Some(duration) => tokio::time::sleep(duration).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
+async fn await_admission(admission: Option<watch::Receiver<bool>>) -> Result<()> {
+    if let Some(mut receiver) = admission {
+        while !*receiver.borrow_and_update() {
+            receiver
+                .changed()
+                .await
+                .context("controller admission channel closed")?;
+        }
+    }
+    Ok(())
+}

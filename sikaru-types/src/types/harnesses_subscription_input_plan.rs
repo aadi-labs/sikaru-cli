@@ -1,0 +1,44 @@
+pub use crate::prelude::*;
+#[allow(unused_imports)]
+use super::*;
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SubscriptionInputPlan {
+    Build,
+    Team,
+    /// This variant is used for forward compatibility.
+    /// If the server sends a value not recognized by the current SDK version,
+    /// it will be captured here with the raw string value.
+    __Unknown(String),
+}
+impl Serialize for SubscriptionInputPlan {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Build => serializer.serialize_str("build"),
+            Self::Team => serializer.serialize_str("team"),
+            Self::__Unknown(val) => serializer.serialize_str(val),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SubscriptionInputPlan {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "build" => Ok(Self::Build),
+            "team" => Ok(Self::Team),
+            _ => Ok(Self::__Unknown(value)),
+        }
+    }
+}
+
+impl fmt::Display for SubscriptionInputPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Build => write!(f, "build"),
+            Self::Team => write!(f, "team"),
+            Self::__Unknown(val) => write!(f, "{}", val),
+        }
+    }
+}

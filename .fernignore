@@ -4,10 +4,35 @@ client-extensions/**
 
 scripts/**
 
-tests/**
+tests/.gitignore
+tests/auto_improve.rs
+tests/event_stream.rs
+tests/execution_environment.rs
+tests/sdk_retry_policy.rs
+tests/compute_executor.rs
+tests/compute_recovery.rs
+tests/compute_contract.rs
 
 .github/**
 
 # Preserve release configuration and history.
 dist-workspace.toml
 CHANGELOG.md
+
+# Native authored commands only; schema, SDK adapter and entrypoint stay generated.
+cli/sikaru/custom.rs
+cli/sikaru/compute.rs
+
+cli/sikaru/compute_config.rs
+cli/sikaru/compute_journal.rs
+cli/sikaru/compute_process.rs
+cli/sikaru/compute_transport.rs
+cli/sikaru/compute_runtime.rs
+
+cli/sikaru/compute_state.rs
+cli/sikaru/compute_workflow.rs
+cli/sikaru/compute_launcher.rs
+cli/sikaru/compute_worker.rs
+tests/compute_workflows.rs
+tests/compute_worker.rs
+tests/compute_packaged_acceptance.rs

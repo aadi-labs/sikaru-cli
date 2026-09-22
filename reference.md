@@ -9,6 +9,11 @@ Full command reference for `sikaru`.
 - [`sikaru agent-imports`](#sikaru-agent-imports)
 - [`sikaru agents`](#sikaru-agents)
 - [`sikaru changesets`](#sikaru-changesets)
+- [`sikaru compute-attachments`](#sikaru-compute-attachments)
+- [`sikaru compute-credentials`](#sikaru-compute-credentials)
+- [`sikaru compute-environments`](#sikaru-compute-environments)
+- [`sikaru compute-operations`](#sikaru-compute-operations)
+- [`sikaru compute-workers`](#sikaru-compute-workers)
 - [`sikaru connections`](#sikaru-connections)
 - [`sikaru context-registry`](#sikaru-context-registry)
 - [`sikaru conversations`](#sikaru-conversations)
@@ -274,6 +279,292 @@ Stage Changeset
 | `--project-id` | `string` | Yes |  |
 | `--changeset-id` | `string` | Yes |  |
 | `--json` | `JSON` | No | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru compute-attachments`
+
+#### `sikaru compute-attachments abandon`
+
+Irreversibly abandon execution authority, preserving unknown effects. Cleanup is still required.
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/abandon`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-attachments cancel`
+
+Idempotently request stopping. This never asserts child cleanup.
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/cancel`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+
+#### `sikaru compute-attachments claim`
+
+Same attachment/key/worker returns the same launch identity, never another launch.
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/claim`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-attachments cleanup`
+
+Cleanup Compute Executor
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/cleanup`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-attachments connect`
+
+Attest original workspace/journal. Reconnection never replays uncertain effects.
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/connect`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-attachments create`
+
+Same session/key/workspace returns the original binding; changed workspace conflicts.
+
+`POST /v1/projects/{project_id}/execution-sessions/{session_id}/compute-attachments`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--session-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-attachments get`
+
+Get Compute Attachment
+
+`GET /v1/projects/{project_id}/compute-attachments/{attachment_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+
+#### `sikaru compute-attachments heartbeat`
+
+Heartbeat Compute Executor
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/heartbeat`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+
+#### `sikaru compute-attachments issue-credential`
+
+Issue Compute Executor Credential
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/credentials`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-attachments ready`
+
+Ready Compute Executor
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/ready`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-attachments reconcile`
+
+Reconcile Compute Executor
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/reconcile`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-attachments status`
+
+Compute Executor Status
+
+`GET /v1/projects/{project_id}/compute-attachments/{attachment_id}/status`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+
+#### `sikaru compute-attachments stop`
+
+Executor can stop its own attachment and cancel its runs; cleanup is separately reported.
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/stop`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+
+#### `sikaru compute-attachments teardown`
+
+Controller or owning worker attests sandbox teardown; clean parked turns stay resumable.
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/teardown`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru compute-credentials`
+
+#### `sikaru compute-credentials renew`
+
+Renew Compute Credential
+
+`POST /v1/projects/{project_id}/compute-credentials/renew`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru compute-credentials revoke`
+
+Revoke Compute Credential
+
+`POST /v1/projects/{project_id}/compute-credentials/{credential_id}/revoke`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--credential-id` | `string` | Yes |  |
+
+---
+
+### `sikaru compute-environments`
+
+#### `sikaru compute-environments create`
+
+Same key + same configuration returns the same environment; changed input conflicts.
+
+`POST /v1/projects/{project_id}/compute-environments`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-environments disable`
+
+Idempotently disable future claims and credentials; existing cleanup remains required.
+
+`POST /v1/projects/{project_id}/compute-environments/{environment_id}/disable`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--environment-id` | `string` | Yes |  |
+
+#### `sikaru compute-environments get`
+
+Get Compute Environment
+
+`GET /v1/projects/{project_id}/compute-environments/{environment_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--environment-id` | `string` | Yes |  |
+
+---
+
+### `sikaru compute-operations`
+
+#### `sikaru compute-operations poll`
+
+Poll Compute Work
+
+`GET /v1/projects/{project_id}/compute-attachments/{attachment_id}/work`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--wait-seconds` | `integer` | No |  |
+| `--limit` | `integer` | No |  |
+
+#### `sikaru compute-operations submit-receipt`
+
+Only exact immutable receipt retries are idempotent; changed content conflicts.
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/receipts`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru compute-workers`
+
+#### `sikaru compute-workers issue-credential`
+
+Issue a new secret once; retries issue independent revocable credentials.
+
+`POST /v1/projects/{project_id}/compute-environments/{environment_id}/credentials`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--environment-id` | `string` | Yes |  |
+
+#### `sikaru compute-workers poll`
+
+Bounded queue snapshot. wait_seconds is a maximum; server may return immediately.
+
+`GET /v1/projects/{project_id}/compute-environments/{environment_id}/queue`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--environment-id` | `string` | Yes |  |
+| `--wait-seconds` | `integer` | No |  |
+| `--limit` | `integer` | No |  |
 
 ---
 
@@ -943,6 +1234,17 @@ Create Harness Version
 
 ### `sikaru harnesses`
 
+#### `sikaru harnesses cancel-subscription`
+
+Cancel Subscription
+
+`POST /v1/projects/{project_id}/harnesses/{harness_id}/budget/subscription/cancel`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
+
 #### `sikaru harnesses get-improvement`
 
 Get Improvement
@@ -954,6 +1256,28 @@ Get Improvement
 | `--project-id` | `string` | Yes |  |
 | `--harness-id` | `string` | Yes |  |
 | `--job-id` | `string` | Yes |  |
+
+#### `sikaru harnesses get-invoice-budget`
+
+Get Invoice Budget
+
+`GET /v1/projects/{project_id}/harnesses/{harness_id}/budget/invoice`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
+
+#### `sikaru harnesses get-subscription`
+
+Get Subscription
+
+`GET /v1/projects/{project_id}/harnesses/{harness_id}/budget/subscription`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
 
 #### `sikaru harnesses improvement-options`
 
@@ -997,6 +1321,18 @@ Resume Improvement
 Start Improvement
 
 `POST /v1/projects/{project_id}/harnesses/{harness_id}/improvements`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru harnesses subscribe`
+
+Subscribe
+
+`POST /v1/projects/{project_id}/harnesses/{harness_id}/budget/subscription`
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|

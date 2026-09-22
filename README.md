@@ -54,65 +54,79 @@ Commands support `--dry-run` to validate requests without sending them, and
 `--format json` for scripts. Use `--help` on an operation for its required fields.
 Mutation requests are not automatically retried.
 
-For customer-owned compute, start a run or append a session turn with
-`execution_environment: "local"`, `compute_provider_id`, a `compute.execute`
-capability grant, and a matching tool provider reference with capability prefix
-`compute`. Managed compute remains the default. Register and attach the public
-compute capability through the ordinary API commands:
-
-```sh
-sikaru tool-providers register_tool_provider --project-id PROJECT --json '{"provider_type":"custom","display_name":"My computer","capability_prefix":"compute","tool_catalog_ref":"inline://local-compute","broker_endpoint_ref":"inline://local-compute"}'
-# Use toolProviderId from that response as PROVIDER below.
-sikaru tool-providers attach_source_tool_skill --project-id PROJECT --tool-provider-id PROVIDER --json '{"description":"Local process and workspace operations","capability_refs":["compute.execute"],"source":{"kind":"markdown","content":"Execute local compute operations through compute.execute with method and arguments."}}'
-```
-
-Use the returned source skill reference in the run's provider reference when
-selecting source skills explicitly. Inspect `sikaru runs start --schema` for the
-full start body and required agent input fields.
-
 ## Run compute on your machine
 
-Install the generated `sikaru` binary and this companion (Python 3.11+, macOS or
-Linux):
+The installed `sikaru` binary bundles the native executor on macOS and Linux.
+No Python runtime or compute companion is required.
 
 ```sh
-pipx install "git+https://github.com/aadi-labs/sikaru-cli.git@v0.1.0#subdirectory=client-extensions/cli"
-sikaru-compute --project-id PROJECT --run-id RUN --provider-id PROVIDER \
-  --workspace /absolute/path/to/workspace --state-dir /absolute/path/to/new-run-state
+sikaru exec --project PROJECT --agent AGENT --workspace /absolute/workspace --prompt "Complete this task"
+sikaru exec --project PROJECT --workspace /absolute/workspace --resume /absolute/workspace/.sikaru-STATE
+sikaru exec --project PROJECT --agent AGENT --workspace /absolute/workspace --prompt-file task.txt --approval-wait 300 --timeout 3600
 ```
 
-The companion connects to an existing local-compute run. It polls the hosted
-run through the generated CLI and executes admitted `compute.execute` requests:
-`bash.start`, `bash.read`, `bash.wait`, `bash.cancel`, and `workspace.write_text`.
-The agent and its instructions continue running on Sikaru. Set `SIKARU_API_KEY`
-as for the CLI; `--cli` selects its executable and `--base-url` selects an endpoint.
+Each fresh invocation creates a session, environment, attachment, and private state
+directory. The result includes `state_dir` for explicit resume. Resume preserves
+the original physical workspace and journal; it rejects uncertain prior effects
+and never silently substitutes a directory. A new `--prompt` on resume appends or
+steers a turn; omit it to observe the existing run. Setup interrupted before the
+executor starts can resume idempotently with the original prompt. Environments
+remain active for continuation. Files and journals remain in the caller workspace.
 
-Commands default to the supplied workspace and execute with your user's machine
-permissions and environment (excluding inherited `SIKARU_*` variables). The workspace is a working directory, not a sandbox.
-Use a dedicated account or isolated machine when appropriate. Output is bounded
-by `--output-limit` (default 65536 bytes), command lifetime by `--command-timeout`
-(default 120 seconds), and connection lifetime by `--timeout` (default 3600 seconds).
-Hosted termination, loss of status visibility, interruption, or failure stops local
-process groups. Graceful cleanup cannot run after a machine crash or SIGKILL.
+Final stdout is one JSON object. Progress and diagnostics use stderr. Exit codes:
+0 completed, 1 failed, 2 approval required, 3 cancelled, 4 recovery required.
+`cleanup` and `cancel_acknowledged` are independent: stopping children does not prove
+an interrupted effect's receipt. Missing usage/cost is `available:false`.
+`final_output` contains the durable product result when available. The default
+approval policy parks after confirmed cleanup; `--approval-wait` waits a bounded
+number of seconds for the controller's decision. INT/TERM and deadlines await
+owned process cleanup before returning. A crash or SIGKILL can require explicit
+controller teardown and recovery.
 
-Use one companion per run and a fresh state directory. The fsynced journal records
-execution before dispatch and receipts before submission. Only identical receipts
-are retried; commands are never automatically replayed. An existing journal is
-refused, including after an uncertain interruption: inspect it and reconcile the
-hosted run before starting a new run. Do not reconnect an interrupted run with a
-new state directory. Output and journals are retained locally for inspection.
+For an application-provisioned sandbox, use `sikaru compute serve --bootstrap -`.
+Supply the scoped executor bootstrap JSON over stdin (or a private 0600 file),
+never a controller credential. The bootstrap includes project/session/attachment,
+owner epoch, original workspace provenance/generation, journal and credential IDs,
+scoped token, workspace and state directory. Scoped serving returns the same
+lifecycle fields; it cannot fetch project-wide run results, and usage is unavailable.
 
-The Sikaru service team maintains the API contract.
-This repository contains public client code only. Language clients are available
-in [sikaru-sdk](https://github.com/aadi-labs/sikaru-sdk).
+For customer infrastructure:
+
+```sh
+sikaru compute worker --bootstrap /private/worker.json --launcher /absolute/launcher --concurrency 4
+```
+
+Worker bootstrap fields are `project_id`, `environment_id`, `token` (restricted
+worker credential), and `state_dir` (private durable directory). `--once` drains
+one queue page. The worker renews only its credential, never an executor lease.
+Startup remains bounded at 180 seconds; executor readiness owns the 60-second lease.
+
+The launcher is a customer-owned executable receiving JSON on stdin. Protocol v1
+requests contain `version:1`, `operation` (`launch`, `status`, `teardown`), stable
+`launch_id`, project/environment/session/attachment IDs, claim, workspace generation,
+original provenance, journal ID, and an optional previously proven `handle`.
+Only `launch` includes the scoped `credential` and `base_url`. The launcher must
+create one sandbox for the stable launch identity, retain a lookup after lost ACK,
+and start `sikaru compute serve` there using the supplied identity and credentials.
+Responses contain `version`, `launch_id`, `status` (`launched`, `running`,
+`terminated`, `not_launched`, or `unknown`), optional `handle`, and `evidence`.
+A handle is `{ "kind":"container"|"sandbox", "id":"immutable identity", "proof":"creation nonce" }`;
+a bare PID is never sufficient. Teardown must prove termination with the same
+handle and nonempty evidence, or prove that the launch never happened. JSON responses
+are limited to 64 KiB. The worker fsyncs intent before launch and never relaunches
+an ambiguous result. Preserve worker state across restarts. Revoked worker credentials
+require controller teardown if reporting cleanup can no longer authenticate.
+
+Local commands use the caller's OS permissions; a workspace is not isolation.
+Task and launcher child environments strip `SIKARU_*` control credentials. The
+managed agent and its private instructions remain hosted by Sikaru.
 
 ## Verify
 
 ```sh
-cargo test --locked --bin sikaru --test sdk_retry_policy
+cargo test --locked --bin sikaru --test sdk_retry_policy --test compute_executor --test compute_recovery --test compute_workflows --test compute_worker --test compute_contract
 cargo build --locked --bin sikaru
 node scripts/check-cli.mjs target/debug/sikaru
-SIKARU_TEST_CLI="$PWD/target/debug/sikaru" python3 -m unittest discover -s tests -p test_local_compute.py
 ```
 
 ## Automatic harness improvement
@@ -193,3 +207,45 @@ its IDs; this command does not wait for completion or start an interactive chat.
 Use the execution-session and run commands to follow or continue the session.
 Draft testing requires the server's draft execution API and appropriate project
 permissions. This workflow does not activate a production release.
+
+### Native attachment executor
+
+On macOS and Linux, `sikaru compute serve --bootstrap -` serves one already
+claimed attachment using JSON on stdin. `--bootstrap /absolute/private.json`
+also accepts an owned regular file with mode `0600`. The bootstrap contains
+`project_id`, `session_id`, `attachment_id`, `owner_epoch`, `workspace_generation`,
+`journal_id`, `credential_id`, `token`, `workspace_provenance` (`kind` and opaque
+`identity`), `workspace`, and `state_dir`. An optional `command_timeout_seconds`
+is between 1 and 86400 (default 120). Pass credentials through stdin or the
+private file, never arguments. `--base-url` and shared TLS/proxy configuration
+apply to the generated SDK transport.
+
+The workspace must already exist. The state directory must have an existing
+parent, contain no symlink path components, and be private to the current user;
+the executor creates it with mode `0700` when absent. Canonicalize temporary
+paths on macOS (for example `/private/var/...`). Keep the state directory across
+reconnections. It holds an exclusively locked, fsynced operation journal and
+output artifacts. Task files remain in the workspace. The workspace is not a
+security sandbox; execution trusts the host and the account running the CLI.
+Task environments omit `SIKARU_*`, including task-provided values, while retaining
+customer infrastructure configuration.
+
+A process restart requires confirmed teardown and a new claim/epoch/credential.
+The new scoped API status must match the original attachment, session, journal,
+workspace generation and provenance; the journal additionally checks the local
+workspace device/inode. Persisted numeric process IDs never authorize signals.
+An intent without an immutable receipt requires recovery and is never replayed.
+A lost acknowledgement permits resending the identical receipt. Caller-owned
+launchers must prove teardown before issuing a replacement claim.
+
+The final stdout JSON reports `status`, durable `execution` when available,
+`cleanup`, `cancel_acknowledged`, and `usage.available` (false when unavailable).
+Progress belongs on stderr. Exit codes are 0 for completed, 1 for failed,
+2 for approval required, 3 for cancellation, and 4 for recovery required.
+Cancellation with an interrupted operation can report recovery required while
+separately confirming cancellation acknowledgement and process teardown.
+Empty work pages do not indicate completion. SIGINT and SIGTERM await owned
+process-group cleanup. Output artifacts retain up to 1 MiB per process; reaching
+that limit terminates the process and reports truncation. Output pages use byte
+offsets, decode UTF-8 lossily, and cap raw pages at 24 KiB so escaped control
+characters remain within the receipt's serialized size limit.
