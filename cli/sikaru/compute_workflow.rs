@@ -31,19 +31,41 @@ struct Saved {
 pub fn command() -> clap::Command {
     clap::Command::new("exec")
         .about("Run an agent in an existing local workspace")
-        .arg(clap::Arg::new("project").long("project").required(true))
+        .arg(
+            clap::Arg::new("project")
+                .long("project")
+                .env("SIKARU_PROJECT")
+                .required(true),
+        )
         .arg(
             clap::Arg::new("agent")
                 .long("agent")
+                .env("SIKARU_AGENT")
                 .required_unless_present("resume"),
         )
-        .arg(clap::Arg::new("workspace").long("workspace").required(true))
+        .arg(
+            clap::Arg::new("workspace")
+                .long("workspace")
+                .visible_alias("cd")
+                .short('C')
+                .default_value("."),
+        )
         .arg(
             clap::Arg::new("prompt")
                 .long("prompt")
-                .conflicts_with("prompt-file"),
+                .conflicts_with_all(["prompt-file", "task"]),
         )
-        .arg(clap::Arg::new("prompt-file").long("prompt-file"))
+        .arg(
+            clap::Arg::new("prompt-file")
+                .long("prompt-file")
+                .conflicts_with("task")
+                .help("UTF-8 task file, or - for stdin"),
+        )
+        .arg(
+            clap::Arg::new("task")
+                .value_name("PROMPT")
+                .help("Task to run, or - to read stdin"),
+        )
         .arg(
             clap::Arg::new("resume")
                 .long("resume")
@@ -77,12 +99,28 @@ pub async fn execute(
     m: &clap::ArgMatches,
     ctx: &fern_cli_sdk::openapi::AppContext,
 ) -> Result<Value> {
-    let workspace = PathBuf::from(m.get_one::<String>("workspace").unwrap()).canonicalize()?;
+    let text = super::input::prompt(m)?;
+    let workspace = PathBuf::from(m.get_one::<String>("workspace").unwrap())
+        .canonicalize()
+        .map_err(|_| {
+            super::input::InvalidInput(
+                "Workspace does not exist or cannot be read. Use --workspace PATH.",
+            )
+        })?;
+    if m.try_get_one::<bool>("dry-run").ok().flatten() == Some(&true) {
+        return Ok(
+            json!({"status":"completed","dry_run":true,"workspace":workspace,
+            "project":m.get_one::<String>("project"),"agent":m.get_one::<String>("agent"),
+            "resume":m.get_one::<String>("resume"),"cleanup":"not_started",
+            "usage":{"available":false},"scope":"Input validation only; does not verify remote readiness or resume journal."}),
+        );
+    }
     let (mut saved, path) = open_state(m, &workspace)?;
     eprintln!("{}", json!({"event":"workspace_opened","state_dir":path}));
     let client = crate::sdk::client(ctx);
-    let outcome = execute_saved(m, ctx, &client, &mut saved, &path).await;
-    let mut result = outcome.unwrap_or_else(|_| state::failure("controller_or_resume_failed"));
+    let outcome = execute_saved(m, ctx, &client, &mut saved, &path, text).await;
+    let mut result = outcome
+        .unwrap_or_else(|error| super::diagnostics::failure(&error, "controller_or_resume_failed"));
     result["session_id"] = json!(saved.value.session);
     result["attachment_id"] = json!(saved.value.attachment.as_ref().map(|a| &a.id));
     result["state_dir"] = json!(path);
@@ -158,12 +196,6 @@ fn validate_resume(m: &clap::ArgMatches, saved: &Saved, path: &std::path::Path) 
     Ok(())
 }
 
-fn prompt(m: &clap::ArgMatches) -> Result<Option<String>> {
-    if let Some(path) = m.get_one::<String>("prompt-file") {
-        return Ok(Some(std::fs::read_to_string(path)?));
-    }
-    Ok(m.get_one::<String>("prompt").cloned())
-}
 async fn provision(m: &clap::ArgMatches, c: &ApiClient, s: &mut State<Saved>) -> Result<()> {
     if s.value.session.is_none() {
         let response = call(c.execution_sessions.create(
@@ -230,8 +262,8 @@ async fn execute_saved(
     c: &ApiClient,
     s: &mut State<Saved>,
     path: &std::path::Path,
+    text: Option<String>,
 ) -> Result<Value> {
-    let text = prompt(m)?;
     if !s.value.executor_started && text.is_none() {
         bail!("fresh execution requires a prompt");
     }

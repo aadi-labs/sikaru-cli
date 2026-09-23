@@ -54,6 +54,44 @@ Commands support `--dry-run` to validate requests without sending them, and
 `--format json` for scripts. Use `--help` on an operation for its required fields.
 Mutation requests are not automatically retried.
 
+## Everyday workflow
+
+```sh
+sikaru auth login
+export SIKARU_PROJECT=YOUR_PROJECT_ID
+export SIKARU_AGENT=YOUR_AGENT_SLUG
+sikaru doctor
+sikaru chat
+sikaru exec "Fix the failing tests"
+cat task.txt | sikaru exec -
+sikaru exec --dry-run "Check this task before starting"
+```
+
+`--project` and `--agent` override the environment defaults. The workspace defaults
+to the current directory; use `-C PATH`, `--cd PATH`, or `--workspace PATH` to
+select another existing directory. The hosted Sikaru model remains managed.
+
+`chat` is a terminal conversation with `/help`, `/status`, and `/exit`. Each
+message continues the same durable session. It shows completed replies and the
+state directory on stderr; a final JSON result stays on stdout. It stops on
+approval, cancellation, failure, or uncertain recovery. Resume explicitly with
+`sikaru chat --resume STATE_DIRECTORY` in the original workspace. This is a simple
+line-based interface, not a full-screen editor or a token-by-token text renderer.
+
+`exec` retains its single JSON result and existing exit codes. Supply one of a
+positional prompt, `--prompt`, or `--prompt-file`. Use `-` as the positional prompt
+or prompt-file to read stdin explicitly. Empty input fails before local or remote
+state is created. File/stdin prompts must be UTF-8 and at most 1 MiB. A dry run
+validates input only: it does not create journals, make requests, or verify a
+saved resume journal. Global formatting options apply to generated API commands;
+native commands retain their documented JSON output contract.
+
+`doctor` checks the workspace and project read access. It does not certify
+billing, agent readiness, write permissions, or sandbox isolation. No run is
+started. Native request failures provide safe next steps for authentication,
+access, missing resources, and billing without displaying arbitrary provider
+response bodies. Preserve the state directory when recovering an interrupted run.
+
 ## Run compute on your machine
 
 The installed `sikaru` binary bundles the native executor on macOS and Linux.
@@ -175,7 +213,7 @@ enabled. This flag does not run an optimizer on your computer.
 ### Author an agent
 
 Install the authored companion separately: `cargo install --path client-extensions/authoring --locked`.
-The generated `sikaru` binary contains only API commands.
+The `sikaru` binary includes generated API commands and authored native execution commands.
 
 ```sh
 sikaru-authoring init my-agent --name my-agent

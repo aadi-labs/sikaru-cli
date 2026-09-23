@@ -36,3 +36,8 @@ cli/sikaru/compute_worker.rs
 tests/compute_workflows.rs
 tests/compute_worker.rs
 tests/compute_packaged_acceptance.rs
+
+cli/sikaru/compute_input.rs
+cli/sikaru/compute_diagnostics.rs
+cli/sikaru/compute_chat.rs
+cli/sikaru/compute_doctor.rs

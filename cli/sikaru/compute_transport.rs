@@ -208,8 +208,13 @@ pub enum TransportFailure {
     Transient,
     #[error("permanent_transport_failure")]
     Permanent,
+    #[error("request_rejected_{0}")]
+    Rejected(u16),
 }
 pub fn classify(error: ApiError) -> anyhow::Error {
+    if let Some(status) = rejected_status(&error) {
+        return anyhow::Error::new(TransportFailure::Rejected(status));
+    }
     let transient = match error {
         ApiError::Network(_) | ApiError::ServiceUnavailableError { .. } => true,
         ApiError::Http { status, .. } => status == 429 || (500..600).contains(&status),
@@ -220,6 +225,15 @@ pub fn classify(error: ApiError) -> anyhow::Error {
     } else {
         TransportFailure::Permanent
     })
+}
+fn rejected_status(error: &ApiError) -> Option<u16> {
+    match error {
+        ApiError::UnauthorizedError { .. } => Some(401),
+        ApiError::ForbiddenError { .. } => Some(403),
+        ApiError::NotFoundError { .. } => Some(404),
+        ApiError::Http { status, .. } if matches!(status, 401..=404) => Some(*status),
+        _ => None,
+    }
 }
 pub fn transient(error: &anyhow::Error) -> bool {
     matches!(

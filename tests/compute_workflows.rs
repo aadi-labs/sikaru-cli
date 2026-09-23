@@ -181,6 +181,9 @@ mod workflow {
     impl Oracle {
         fn fault(&self, path: &str) -> Option<ResponseTemplate> {
             match (self.scenario, path.rsplit('/').next().unwrap()) {
+                ("billing", "execution-sessions") => {
+                    Some(ResponseTemplate::new(402).set_body_string("secret-provider-token"))
+                }
                 ("startupfail", "status") | ("cleanupfail", "cleanup") => {
                     Some(ResponseTemplate::new(503))
                 }
@@ -280,6 +283,222 @@ mod workflow {
             .await;
         (server, state, tempfile::tempdir().unwrap())
     }
+    #[tokio::test]
+    async fn missing_prompt_fails_before_creating_state_or_remote_session() {
+        let (server, state, dir) = setup("completed").await;
+        let (code, result) = launch(&server, dir.path(), &["--agent", "agent"]).await;
+        assert_eq!(code, 1);
+        assert_eq!(result["reason"], "invalid_input");
+        assert_eq!(state.lock().unwrap().sessions, 0);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn positional_prompt_and_environment_defaults_complete_in_current_directory() {
+        let (server, state, dir) = setup("completed").await;
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+            .current_dir(dir.path())
+            .env("SIKARU_API_KEY", "controller-secret")
+            .env("SIKARU_PROJECT", "project")
+            .env("SIKARU_AGENT", "agent")
+            .args(["--base-url", &server.uri(), "exec", "Write output"])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["status"], "completed");
+        assert_eq!(state.lock().unwrap().sessions, 1);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("output.txt")).unwrap(),
+            "native effect"
+        );
+    }
+
+    #[tokio::test]
+    async fn billing_failure_provides_advice_without_exposing_response_body() {
+        let (server, _, dir) = setup("billing").await;
+        let (code, result) = launch(
+            &server,
+            dir.path(),
+            &["--agent", "agent", "--prompt", "task"],
+        )
+        .await;
+        assert_eq!(code, 4);
+        assert!(
+            result["help"].as_str().unwrap().contains("subscription"),
+            "{result}"
+        );
+        assert!(!result.to_string().contains("secret-provider-token"));
+        assert!(result["state_dir"].is_string());
+    }
+
+    #[tokio::test]
+    async fn piped_task_executes_once_and_conflicting_inputs_are_rejected() {
+        use tokio::io::AsyncWriteExt;
+        let (server, state, dir) = setup("normal").await;
+        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+            .env("SIKARU_API_KEY", "controller-secret")
+            .args([
+                "--base-url",
+                &server.uri(),
+                "exec",
+                "--project",
+                "project",
+                "--agent",
+                "agent",
+                "--workspace",
+                dir.path().to_str().unwrap(),
+                "-",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"Write the output")
+            .await
+            .unwrap();
+        let output = child.wait_with_output().await.unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(state.lock().unwrap().turns, 1);
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+            .args([
+                "exec",
+                "--project",
+                "project",
+                "--agent",
+                "agent",
+                "task",
+                "--prompt",
+                "other",
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(!output.status.success());
+    }
+
+    #[tokio::test]
+    async fn terminal_chat_continues_one_session_for_two_turns() {
+        use std::io::Write;
+        use std::os::fd::FromRawFd;
+        let (server, state, dir) = setup("completedresume").await;
+        let (mut master, mut slave) = (0, 0);
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        let mut input = unsafe { std::fs::File::from_raw_fd(master) };
+        let terminal = unsafe { std::fs::File::from_raw_fd(slave) };
+        let child = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+            .env("SIKARU_API_KEY", "controller-secret")
+            .args([
+                "--base-url",
+                &server.uri(),
+                "chat",
+                "--project",
+                "project",
+                "--agent",
+                "agent",
+                "--workspace",
+                dir.path().to_str().unwrap(),
+            ])
+            .stdin(terminal)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        input
+            .write_all(b"first task\nsecond task\n/exit\n")
+            .unwrap();
+        let output = tokio::time::timeout(Duration::from_secs(35), child.wait_with_output())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(state.lock().unwrap().sessions, 1);
+        assert_eq!(state.lock().unwrap().turns, 2);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("output.txt")).unwrap(),
+            "second effect"
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn dry_run_validates_without_remote_requests_or_local_journals() {
+        let (server, state, dir) = setup("normal").await;
+        let (code, result) = launch(
+            &server,
+            dir.path(),
+            &["--agent", "agent", "--prompt", "task", "--dry-run"],
+        )
+        .await;
+        assert_eq!(code, 0);
+        assert_eq!(result["dry_run"], true);
+        assert_eq!(state.lock().unwrap().sessions, 0);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn doctor_uses_only_project_read_and_redacts_auth_error_bodies() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/projects/project/managed-agents",
+            ))
+            .respond_with(
+                ResponseTemplate::new(401).set_body_json(json!({"detail":"secret-provider-token"})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+            .env("SIKARU_API_KEY", "controller-secret")
+            .args([
+                "--base-url",
+                &server.uri(),
+                "doctor",
+                "--project",
+                "project",
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(!output.status.success());
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["checks"][1]["ok"], false);
+        assert!(result.to_string().contains("auth login"), "{result}");
+        assert!(!result.to_string().contains("secret-provider-token"));
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
     #[tokio::test]
     async fn running_workflow_emits_identities_before_single_final_json() {
         use tokio::io::{AsyncBufReadExt, BufReader};

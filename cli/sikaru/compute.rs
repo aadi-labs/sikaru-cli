@@ -16,6 +16,18 @@ pub mod runtime;
 pub mod transport;
 
 #[cfg(unix)]
+#[path = "compute_chat.rs"]
+pub mod chat;
+#[cfg(unix)]
+#[path = "compute_diagnostics.rs"]
+pub mod diagnostics;
+#[cfg(unix)]
+#[path = "compute_doctor.rs"]
+pub mod doctor;
+#[cfg(unix)]
+#[path = "compute_input.rs"]
+pub mod input;
+#[cfg(unix)]
 #[path = "compute_launcher.rs"]
 pub mod launcher;
 #[cfg(unix)]
@@ -33,10 +45,30 @@ pub fn install(app: CliApp) -> CliApp {
     {
         return app
             .command(
+                doctor::command(),
+                OpenApiBinding::handler(|m, ctx| {
+                    let result = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(doctor::execute(m, ctx))
+                    });
+                    emit(Ok(result));
+                    Ok(())
+                }),
+            )
+            .command(
                 workflow::command(),
                 OpenApiBinding::handler(|m, ctx| {
                     let result = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current().block_on(workflow::execute(m, ctx))
+                    });
+                    emit(result);
+                    Ok(())
+                }),
+            )
+            .command(
+                chat::command(),
+                OpenApiBinding::handler(|m, ctx| {
+                    let result = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(chat::execute(m, ctx))
                     });
                     emit(result);
                     Ok(())
@@ -97,7 +129,8 @@ async fn execute(
 }
 #[cfg(unix)]
 fn emit(result: anyhow::Result<serde_json::Value>) {
-    let result = result.unwrap_or_else(|_| state::failure("bootstrap_or_journal_rejected"));
+    let result = result
+        .unwrap_or_else(|error| diagnostics::failure(&error, "bootstrap_or_journal_rejected"));
     println!("{}", result);
     use std::io::Write;
     let _ = std::io::stdout().flush();
