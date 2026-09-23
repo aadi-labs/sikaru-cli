@@ -6888,7 +6888,7 @@ mod tests {
     }
 
     #[test]
-    fn test_required_leaf_still_reported_when_no_ancestor_shorthand() {
+    fn test_required_leaf_still_reported_for_required_ancestor() {
         // Sanity check: with the same shape as above but no shorthand value
         // supplied, the required-leaf check still fires.
         let mut parameters = std::collections::HashMap::new();
@@ -6898,6 +6898,7 @@ mod tests {
                 location: Some("body".to_string()),
                 param_type: Some("object".to_string()),
                 required: false,
+                required_by_spec: true,
                 ..Default::default()
             },
         );

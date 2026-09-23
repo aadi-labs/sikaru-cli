@@ -1,3 +1,6 @@
+#[path = "../../../cli/sikaru/commands.rs"]
+mod commands;
+
 #[path = "../../cli/authoring.rs"]
 #[allow(dead_code)]
 mod authoring;
@@ -167,7 +170,7 @@ fn dev_dry_run_never_contacts_the_server() {
     authoring::initialize(&root, "demo").unwrap();
     let code = authoring::install(
         CliApp::new("sikaru-authoring")
-            .binding(OpenApiBinding::new().spec(include_str!("../../../cli/sikaru/openapi0.json"))),
+            .binding(OpenApiBinding::new().commands(commands::description())),
     )
     .try_run_from([
         "sikaru-authoring",

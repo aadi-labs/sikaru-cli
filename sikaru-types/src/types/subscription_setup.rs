@@ -11,6 +11,8 @@ pub struct SubscriptionSetup {
     pub mode: SubscriptionSetupMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan: Option<SubscriptionSetupPlan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_change: Option<SubscriptionPlanChange>,
     #[serde(default)]
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32,6 +34,7 @@ pub struct SubscriptionSetupBuilder {
     configured: Option<bool>,
     mode: Option<SubscriptionSetupMode>,
     plan: Option<SubscriptionSetupPlan>,
+    plan_change: Option<SubscriptionPlanChange>,
     state: Option<String>,
     trial: Option<TrialStatus>,
     url: Option<String>,
@@ -55,6 +58,11 @@ impl SubscriptionSetupBuilder {
 
     pub fn plan(mut self, value: SubscriptionSetupPlan) -> Self {
         self.plan = Some(value);
+        self
+    }
+
+    pub fn plan_change(mut self, value: SubscriptionPlanChange) -> Self {
+        self.plan_change = Some(value);
         self
     }
 
@@ -84,6 +92,7 @@ impl SubscriptionSetupBuilder {
             configured: self.configured.ok_or_else(|| BuildError::missing_field("configured"))?,
             mode: self.mode.ok_or_else(|| BuildError::missing_field("mode"))?,
             plan: self.plan,
+            plan_change: self.plan_change,
             state: self.state.ok_or_else(|| BuildError::missing_field("state"))?,
             trial: self.trial,
             url: self.url,

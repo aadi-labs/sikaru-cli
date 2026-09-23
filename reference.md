@@ -1245,6 +1245,18 @@ Cancel Subscription
 | `--project-id` | `string` | Yes |  |
 | `--harness-id` | `string` | Yes |  |
 
+#### `sikaru harnesses change-subscription`
+
+Change Subscription
+
+`POST /v1/projects/{project_id}/harnesses/{harness_id}/budget/subscription/change`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
 #### `sikaru harnesses get-improvement`
 
 Get Improvement

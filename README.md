@@ -121,6 +121,15 @@ Local commands use the caller's OS permissions; a workspace is not isolation.
 Task and launcher child environments strip `SIKARU_*` control credentials. The
 managed agent and its private instructions remain hosted by Sikaru.
 
+## Harbor and Pier evaluation
+
+The authored [Sikaru evaluation adapters](client-extensions/eval/README.md) launch
+`sikaru exec` inside each runner's task environment while the agent stays hosted.
+Install `./client-extensions/eval[harbor,pier]` in the runner's Python environment,
+then select `sikaru_eval.harbor:SikaruAgent` or `sikaru_eval.pier:SikaruAgent`.
+The guide includes pinned binary installation, credentials, FrontierHarness
+command templates, cancellation and result accounting.
+
 ## Verify
 
 ```sh
@@ -249,3 +258,11 @@ process-group cleanup. Output artifacts retain up to 1 MiB per process; reaching
 that limit terminates the process and reports truncation. Output pages use byte
 offsets, decode UTF-8 lossily, and cap raw pages at 24 KiB so escaped control
 characters remain within the receipt's serialized size limit.
+
+### Command definitions
+
+The CLI ships generated Rust command definitions and its API client. The source
+OpenAPI specification is maintained and compiled in Sikaru's private build
+pipeline; it is not included in this repository or the executable. Use `--help`
+and command-level `--schema` for supported operations and inputs. The generic
+`--spec` and `--spec-raw` options report that no specification is embedded.

@@ -5,8 +5,8 @@
 //!
 //! ## Type Categories
 //!
-//! - **Request/Response Types**: 134 types for API operations
-//! - **Model Types**: 101 types for data representation
+//! - **Request/Response Types**: 133 types for API operations
+//! - **Model Types**: 104 types for data representation
 
 pub mod changesets_list_changesets_changesets_request_status;
 pub mod connections_create_connection_kind;
@@ -30,7 +30,6 @@ pub mod specialists_specialist_message_delivery_mode;
 pub mod feedback_create_feedback_request_kind;
 pub mod feedback_create_feedback_request_target;
 pub mod harness_versions_create_harness_version_request_status;
-pub mod harnesses_subscription_input_plan;
 pub mod harnesses_improvement_input_objective;
 pub mod runs_start_harness_run_request_run_mode;
 pub mod runs_approval_input_decision;
@@ -128,6 +127,10 @@ pub mod specialist_thread;
 pub mod specialist_threads;
 pub mod subscription_cancellation_state;
 pub mod subscription_cancellation;
+pub mod subscription_input_plan;
+pub mod subscription_input;
+pub mod subscription_plan_change_plan;
+pub mod subscription_plan_change;
 pub mod subscription_setup_mode;
 pub mod subscription_setup_plan;
 pub mod subscription_setup;
@@ -185,7 +188,6 @@ pub mod create_harness_version_request;
 pub mod reload_input;
 pub mod funding_input;
 pub mod setup_input;
-pub mod subscription_input;
 pub mod improvement_input;
 pub mod start_harness_run_request;
 pub mod approval_input;
@@ -266,7 +268,6 @@ pub use specialists_specialist_message_delivery_mode::SpecialistMessageDeliveryM
 pub use feedback_create_feedback_request_kind::CreateFeedbackRequestKind;
 pub use feedback_create_feedback_request_target::CreateFeedbackRequestTarget;
 pub use harness_versions_create_harness_version_request_status::CreateHarnessVersionRequestStatus;
-pub use harnesses_subscription_input_plan::SubscriptionInputPlan;
 pub use harnesses_improvement_input_objective::ImprovementInputObjective;
 pub use runs_start_harness_run_request_run_mode::StartHarnessRunRequestRunMode;
 pub use runs_approval_input_decision::ApprovalInputDecision;
@@ -364,6 +365,10 @@ pub use specialist_thread::SpecialistThread;
 pub use specialist_threads::SpecialistThreads;
 pub use subscription_cancellation_state::SubscriptionCancellationState;
 pub use subscription_cancellation::SubscriptionCancellation;
+pub use subscription_input_plan::SubscriptionInputPlan;
+pub use subscription_input::SubscriptionInput;
+pub use subscription_plan_change_plan::SubscriptionPlanChangePlan;
+pub use subscription_plan_change::SubscriptionPlanChange;
 pub use subscription_setup_mode::SubscriptionSetupMode;
 pub use subscription_setup_plan::SubscriptionSetupPlan;
 pub use subscription_setup::SubscriptionSetup;
@@ -421,7 +426,6 @@ pub use create_harness_version_request::CreateHarnessVersionRequest;
 pub use reload_input::ReloadInput;
 pub use funding_input::FundingInput;
 pub use setup_input::SetupInput;
-pub use subscription_input::SubscriptionInput;
 pub use improvement_input::ImprovementInput;
 pub use start_harness_run_request::StartHarnessRunRequest;
 pub use approval_input::ApprovalInput;

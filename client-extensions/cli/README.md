@@ -121,6 +121,15 @@ Local commands use the caller's OS permissions; a workspace is not isolation.
 Task and launcher child environments strip `SIKARU_*` control credentials. The
 managed agent and its private instructions remain hosted by Sikaru.
 
+## Harbor and Pier evaluation
+
+The authored [Sikaru evaluation adapters](client-extensions/eval/README.md) launch
+`sikaru exec` inside each runner's task environment while the agent stays hosted.
+Install `./client-extensions/eval[harbor,pier]` in the runner's Python environment,
+then select `sikaru_eval.harbor:SikaruAgent` or `sikaru_eval.pier:SikaruAgent`.
+The guide includes pinned binary installation, credentials, FrontierHarness
+command templates, cancellation and result accounting.
+
 ## Verify
 
 ```sh

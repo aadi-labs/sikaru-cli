@@ -1009,6 +1009,7 @@ pub(crate) struct ServerVar {
 pub struct CliApp {
     pub(crate) name: String,
     pub(crate) specs: Vec<SpecEntry>,
+    pub(crate) compiled_commands: Option<RestDescription>,
     title_override: Option<String>,
     description_override: Option<String>,
     /// Auth bindings registered via [`auth_scheme`](Self::auth_scheme),
@@ -1069,6 +1070,7 @@ impl CliApp {
         Self {
             name: name.to_string(),
             specs: Vec::new(),
+            compiled_commands: None,
             title_override: None,
             description_override: None,
             auth_bindings: Vec::new(),
@@ -1393,6 +1395,11 @@ impl CliApp {
 
     /// Build the merged `RestDescription` from all registered specs.
     pub(crate) fn build_doc(&self) -> Result<RestDescription, CliError> {
+        let mut doc = if let Some(ref commands) = self.compiled_commands {
+            let mut doc = commands.clone();
+            doc.name = self.name.clone();
+            doc
+        } else {
         if self.specs.is_empty() {
             return Err(CliError::Discovery(
                 "No spec provided. Call .spec() on CliApp.".to_string(),
@@ -1461,7 +1468,8 @@ impl CliApp {
             }
         }
 
-        let mut doc = merged.expect("at least one spec was processed");
+        merged.expect("at least one spec was processed")
+        };
         if let Some(ref t) = self.title_override {
             doc.title = Some(t.clone());
         }

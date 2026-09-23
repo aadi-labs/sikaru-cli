@@ -68,6 +68,12 @@ impl OpenApiBinding {
         Self::default()
     }
 
+    /// Use generated command definitions without embedding or parsing OpenAPI.
+    pub fn commands(mut self, commands: RestDescription) -> Self {
+        self.inner.compiled_commands = Some(commands);
+        self
+    }
+
     /// Set the OpenAPI spec YAML string.
     pub fn spec(mut self, yaml: &str) -> Self {
         self.inner = self.inner.spec(yaml);

@@ -200,6 +200,59 @@ impl HarnessesClient {
     ///     let client = SikaruClient::new(config).expect("Failed to build client");
     ///     client
     ///         .harnesses
+    ///         .change_subscription(
+    ///             &"project_id".to_string(),
+    ///             &"harness_id".to_string(),
+    ///             &SubscriptionInput {
+    ///                 accepted_recurring_terms: true,
+    ///                 idempotency_key: "idempotency_key".to_string(),
+    ///                 plan: SubscriptionInputPlan::Build,
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn change_subscription(
+        &self,
+        project_id: &str,
+        harness_id: &str,
+        request: &SubscriptionInput,
+        options: Option<RequestOptions>,
+    ) -> Result<SubscriptionPlanChange, ApiError> {
+        let options = {
+            let mut o = options.unwrap_or_default();
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::POST,
+                &format!(
+                    "v1/projects/{}/harnesses/{}/budget/subscription/change",
+                    project_id, harness_id
+                ),
+                Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .harnesses
     ///         .improvement_options(&"project_id".to_string(), &"harness_id".to_string(), None)
     ///         .await;
     /// }

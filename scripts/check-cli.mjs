@@ -15,6 +15,14 @@ function run(args) {
   assert.equal(result.status, 0, result.stderr);
   return result.stdout;
 }
+for (const flag of ["--spec", "--spec-raw"]) {
+  const result = spawnSync(binary, [flag], { env, encoding: "utf8", timeout: 15_000 });
+  if (result.error) throw result.error;
+  assert.notEqual(result.status, 0);
+  const error = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(error), ["error"]);
+  assert.match(error.error.message, /no binding has an embedded API spec/);
+}
 const help = run(["--help"]);
 for (const command of ["agents", "execution-sessions", "runs", "tool-providers", "agent-budgets", "specialists"]) {
   assert.ok(help.includes(command));
@@ -28,6 +36,7 @@ assert.ok(preview.includes("run_example"));
 for (const [resource, methods] of Object.entries({
   "agent-budgets": ["get", "add", "configure_auto_reload", "setup_payment_method"],
   "specialists": ["list", "get", "message", "cancel"],
+  "harnesses": ["get_subscription", "subscribe", "change_subscription", "cancel_subscription"],
   "execution-sessions": ["spend"],
 })) {
   for (const method of methods) {
