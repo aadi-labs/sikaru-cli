@@ -997,3 +997,22 @@ async fn run_inspection_uses_authenticated_generated_transport() {
     let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(value["runId"], "run");
 }
+
+#[tokio::test]
+async fn run_inspection_preserves_access_rejection_without_response_details() {
+    use wiremock::{matchers::{method, path}, Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/projects/project/runs/run"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(
+            serde_json::json!({"detail": "sensitive-upstream-detail"})))
+        .mount(&server).await;
+    let result = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+        .env("SIKARU_API_KEY", "test-key")
+        .args(["--base-url", &server.uri(), "inspect-run", "--project-id", "project", "--run-id", "run"])
+        .output().await.unwrap();
+    assert!(!result.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(value["error"]["code"], 403);
+    assert!(!String::from_utf8_lossy(&result.stdout).contains("sensitive-upstream-detail"));
+}

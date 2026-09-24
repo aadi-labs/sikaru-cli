@@ -50,11 +50,7 @@ pub fn install(app: CliApp) -> CliApp {
                     let result = tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current().block_on(inspect_run(m, ctx))
                     })
-                    .map_err(|_| {
-                        fern_cli_sdk::error::CliError::Validation(
-                            "Run inspection failed; check access and connectivity".into(),
-                        )
-                    })?;
+                    .map_err(inspection_error)?;
                     println!("{}", result);
                     Ok(())
                 }),
@@ -204,4 +200,20 @@ async fn inspect_run(
     ))
     .await?;
     Ok(serde_json::to_value(value)?)
+}
+
+#[cfg(unix)]
+fn inspection_error(error: anyhow::Error) -> fern_cli_sdk::error::CliError {
+    use fern_cli_sdk::error::CliError;
+    match error.downcast_ref::<transport::TransportFailure>() {
+        Some(transport::TransportFailure::Rejected(code)) => CliError::api(
+            *code,
+            "Run inspection was rejected; check the selected credential and project access",
+            "requestRejected",
+        ),
+        Some(transport::TransportFailure::Transient) => CliError::Network(
+            "Run inspection is temporarily unavailable; check connectivity and retry".into(),
+        ),
+        _ => CliError::api(500, "Run inspection failed", "inspectionError"),
+    }
 }
