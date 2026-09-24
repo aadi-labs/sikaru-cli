@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3
+
+- Refresh the generated client for the current public API.
+- Run measurements distinguish observed execution costs, retail usage, and customer charges; unavailable costs remain unknown.
+- Compatible with improved argument feedback and recovery for managed execution. These behavior improvements require the updated managed service.
+
 ## 0.1.0
 
 Initial public release of the Sikaru CLI.

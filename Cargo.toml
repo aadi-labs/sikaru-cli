@@ -1,6 +1,6 @@
 [package]
 name = "sikaru-cli"
-version = "0.2.1"
+version = "0.2.3"
 edition = "2021"
 description = "Official command-line interface for Sikaru"
 license = "Apache-2.0"
