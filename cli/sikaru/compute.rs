@@ -45,6 +45,21 @@ pub fn install(app: CliApp) -> CliApp {
     {
         return app
             .command(
+                inspection_command(),
+                OpenApiBinding::handler(|m, ctx| {
+                    let result = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(inspect_run(m, ctx))
+                    })
+                    .map_err(|_| {
+                        fern_cli_sdk::error::CliError::Validation(
+                            "Run inspection failed; check access and connectivity".into(),
+                        )
+                    })?;
+                    println!("{}", result);
+                    Ok(())
+                }),
+            )
+            .command(
                 doctor::command(),
                 OpenApiBinding::handler(|m, ctx| {
                     let result = tokio::task::block_in_place(|| {
@@ -159,4 +174,34 @@ pub fn exit_code(result: &serde_json::Value) -> i32 {
         Some("recovery_required") => 4,
         _ => 1,
     }
+}
+
+#[cfg(unix)]
+fn inspection_command() -> clap::Command {
+    clap::Command::new("inspect-run")
+        .hide(true)
+        .arg(
+            clap::Arg::new("project-id")
+                .long("project-id")
+                .required(true),
+        )
+        .arg(clap::Arg::new("run-id").long("run-id").required(true))
+}
+
+#[cfg(unix)]
+async fn inspect_run(
+    m: &clap::ArgMatches,
+    ctx: &fern_cli_sdk::openapi::AppContext,
+) -> anyhow::Result<serde_json::Value> {
+    let options = sikaru_sdk::RequestOptions::new()
+        .additional_header("X-Sikaru-Run-Inspection", "true")
+        .max_retries(0);
+    let client = crate::sdk::client(ctx);
+    let value = state::call(client.runs.get(
+        m.get_one::<String>("project-id").unwrap(),
+        m.get_one::<String>("run-id").unwrap(),
+        Some(options),
+    ))
+    .await?;
+    Ok(serde_json::to_value(value)?)
 }

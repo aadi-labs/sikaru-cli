@@ -943,3 +943,57 @@ mod workflow {
         );
     }
 }
+
+#[test]
+fn run_inspection_is_not_advertised_in_help() {
+    let binary = env!("CARGO_BIN_EXE_sikaru");
+    for args in [vec!["--help"], vec!["runs", "--help"]] {
+        let result = Command::new(binary).args(args).output().unwrap();
+        assert!(result.status.success());
+        assert!(!String::from_utf8_lossy(&result.stdout).contains("inspect-run"));
+    }
+    let direct = Command::new(binary)
+        .args(["inspect-run", "--help"])
+        .output()
+        .unwrap();
+    assert!(direct.status.success());
+    assert!(String::from_utf8_lossy(&direct.stdout).contains("--run-id"));
+}
+
+#[tokio::test]
+async fn run_inspection_uses_authenticated_generated_transport() {
+    use wiremock::{
+        matchers::{header, method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/projects/project/runs/run"))
+        .and(header("authorization", "Bearer test-key"))
+        .and(header("X-Sikaru-Run-Inspection", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"runId":"run"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let result = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+        .env("SIKARU_API_KEY", "test-key")
+        .args([
+            "--base-url",
+            &server.uri(),
+            "inspect-run",
+            "--project-id",
+            "project",
+            "--run-id",
+            "run",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(value["runId"], "run");
+}
