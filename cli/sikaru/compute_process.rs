@@ -71,22 +71,74 @@ impl Processes {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub async fn execute(
         &mut self,
         method: &str,
         args: &HashMap<String, Value>,
         journal: &mut Journal,
     ) -> Result<Value> {
+        self.execute_owned(method, args, journal, None).await
+    }
+    pub async fn execute_owned(
+        &mut self,
+        method: &str,
+        args: &HashMap<String, Value>,
+        journal: &mut Journal,
+        operation_key: Option<&str>,
+    ) -> Result<Value> {
         match method {
+            "bash.run" => self.run(args, journal, operation_key).await,
             "workspace.write_text" => write_text(args, journal.binding.anchor.path()),
-            "bash.start" => self.start(args, journal),
+            "bash.start" => self.start(args, journal, operation_key),
             "bash.read" => self.read(args, journal),
             "bash.wait" => self.wait(args, journal).await,
             "bash.cancel" => self.cancel(args, journal),
             _ => bail!("unsupported compute operation"),
         }
     }
-    fn start(&mut self, args: &HashMap<String, Value>, journal: &mut Journal) -> Result<Value> {
+    async fn run(
+        &mut self,
+        args: &HashMap<String, Value>,
+        journal: &mut Journal,
+        operation_key: Option<&str>,
+    ) -> Result<Value> {
+        allowed(args, &["command", "cwd", "env", "yield_seconds", "limit"])?;
+        let seconds = args
+            .get("yield_seconds")
+            .map(|value| value.as_f64().context("yield_seconds must be numeric"))
+            .transpose()?
+            .unwrap_or(1.0);
+        if !seconds.is_finite() || seconds < 0.0 {
+            bail!("invalid yield_seconds");
+        }
+        let limit = integer(args, "limit", 8192)?.min(PAGE_LIMIT as u64);
+        if limit == 0 {
+            bail!("output limit must be positive");
+        }
+        let mut spawn_args = args.clone();
+        spawn_args.remove("yield_seconds");
+        spawn_args.remove("limit");
+        let state = self.start(&spawn_args, journal, operation_key)?;
+        let handle = state["id"].clone();
+        let wait_args = HashMap::from([
+            ("handle_id".into(), handle.clone()),
+            ("timeout".into(), json!(seconds)),
+        ]);
+        self.wait(&wait_args, journal).await?;
+        let read_args = HashMap::from([
+            ("handle_id".into(), handle),
+            ("offset".into(), json!(0)),
+            ("limit".into(), json!(limit)),
+        ]);
+        self.read(&read_args, journal)
+    }
+    fn start(
+        &mut self,
+        args: &HashMap<String, Value>,
+        journal: &mut Journal,
+        operation_key: Option<&str>,
+    ) -> Result<Value> {
         allowed(args, &["command", "cwd", "env"])?;
         let command = string(args, "command")?;
         if command.trim().is_empty() {
@@ -103,12 +155,20 @@ impl Processes {
         journal.verify()?;
         let id = format!("{:032x}", rand::random::<u128>());
         let (artifact, path) = journal.artifact(&id)?;
-        let job = Job::spawn(&id, command, &cwd, env, artifact, path, self.timeout)?;
+        let mut job = Job::spawn(&id, command, &cwd, env, artifact, path, self.timeout)?;
+        if let Some(key) = operation_key {
+            job.state["operation_key"] = json!(key);
+        }
         let state = job.state.clone();
         // Store ownership before any fallible journal write. Drop cleans it on error.
         self.jobs.insert(id.clone(), job);
         journal.handle(&id, state.clone())?;
         Ok(state)
+    }
+    pub fn owns_operation(&self, key: &str) -> bool {
+        self.jobs
+            .values()
+            .any(|job| job.state["operation_key"] == key)
     }
     fn state(&self, id: &str) -> Result<Value> {
         if let Some(job) = self.jobs.get(id) {

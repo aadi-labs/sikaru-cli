@@ -13,11 +13,20 @@ pub fn command() -> Command {
 
 pub async fn execute(m: &ArgMatches, ctx: &AppContext) -> Value {
     let workspace = std::path::Path::new(m.get_one::<String>("workspace").unwrap());
-    let local = workspace.is_dir();
+    let mut checks = local_checks(
+        workspace,
+        std::path::Path::new("/bin/bash"),
+        &std::env::var("PATH").unwrap_or_default(),
+    );
     let project = project_check(m, ctx).await;
-    json!({"status":if local && project["ok"] == true {"completed"} else {"failed"},
-        "checks":[{"name":"workspace","ok":local,"help":"Use an existing directory with --workspace PATH."},project],
-        "scope":"Checks workspace existence and project read access. Does not verify billing, agent readiness, or sandbox isolation."})
+    let ready = checks
+        .iter()
+        .filter(|c| c["required"] == true)
+        .all(|c| c["ok"] == true)
+        && project["ok"] == true;
+    checks.insert(1, project);
+    json!({"status":if ready {"completed"} else {"failed"}, "checks":checks,
+        "scope":"Advisory checks on this CLI's local executor and authenticated project read access. Session admission remains authoritative; billing and agent release readiness are not checked."})
 }
 
 async fn project_check(m: &ArgMatches, ctx: &AppContext) -> Value {
@@ -41,4 +50,50 @@ fn advice(error: &anyhow::Error) -> &'static str {
         Some(TransportFailure::Rejected(404)) => "Project not found. Check --project or SIKARU_PROJECT.",
         _ => "Project access could not be verified. Check connectivity, --base-url, and service availability. No run was started.",
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn missing_shell_is_required_but_search_is_optional() {
+        let dir = tempfile::tempdir().unwrap();
+        let checks = local_checks(dir.path(), &dir.path().join("missing-shell"), "");
+        assert_eq!(checks[0]["ok"], true);
+        assert_eq!(checks[1]["ok"], false);
+        assert_eq!(checks[1]["required"], true);
+        assert_eq!(checks[2]["ok"], false);
+        assert_eq!(checks[2]["required"], false);
+        assert!(checks[2]["help"].as_str().unwrap().contains("fallback"));
+    }
+}
+
+fn executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+fn local_checks(workspace: &std::path::Path, shell: &std::path::Path, path: &str) -> Vec<Value> {
+    let rg = std::env::split_paths(path).any(|p| executable(&p.join("rg")));
+    vec![
+        json!({"name":"workspace_read_access","ok":std::fs::read_dir(workspace).is_ok(),"required":true,
+            "help":"Use a readable directory with --workspace PATH. Write access is not checked."}),
+        json!({"name":"local_shell","ok":executable(shell),"required":true,
+            "help":"The local executor requires executable /bin/bash."}),
+        json!({"name":"local_search","ok":rg,"required":false,
+            "help":"Install rg for fast search. If unavailable, use a scoped shell search fallback."}),
+        json!({"name":"local_protocol","ok":true,"required":true,"version":sikaru_sdk::api::ReadyInputProtocolVersion::SikaruComputeV1,
+            "scope":"This CLI's supported protocol; remote acceptance is checked when attaching."}),
+    ]
+}
+
+pub fn require_shell() -> anyhow::Result<()> {
+    if !executable(std::path::Path::new("/bin/bash")) {
+        return Err(super::input::InvalidInput(
+            "The local executor requires executable /bin/bash. No work started.",
+        )
+        .into());
+    }
+    Ok(())
 }

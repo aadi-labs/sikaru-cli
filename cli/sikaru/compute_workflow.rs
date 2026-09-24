@@ -124,6 +124,7 @@ pub async fn execute(
             "usage":{"available":false},"scope":"Input validation only; does not verify remote readiness or resume journal."}),
         );
     }
+    super::doctor::require_shell()?;
     let (mut saved, path) = open_state(m, &workspace)?;
     runtime::progress(
         super::chat::is_interactive(m),
@@ -219,7 +220,7 @@ fn validate_resume(m: &clap::ArgMatches, saved: &Saved, path: &std::path::Path) 
 
 async fn provision(m: &clap::ArgMatches, c: &ApiClient, s: &mut State<Saved>) -> Result<()> {
     if s.value.session.is_none() {
-        let response = call(c.execution_sessions.create(
+        let response = super::diagnostics::session_admission(c.execution_sessions.create(
             &s.value.project,
             &s.value.agent,
             &SessionInput {

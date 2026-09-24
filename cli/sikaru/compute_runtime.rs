@@ -261,12 +261,16 @@ async fn execute_operation(
     lease: &watch::Receiver<Instant>,
 ) -> Result<ReceiptInput> {
     let method = serde_json::to_value(&op.method)?;
-    let effect = processes.execute(
+    let effect = processes.execute_owned(
         method.as_str().context("invalid method")?,
         &op.arguments,
         journal,
+        Some(key),
     );
     let result = tokio::select! {result=effect=>result,_=lease_expiry(lease.clone())=>bail!("lease_expired")};
+    if result.is_err() && processes.owns_operation(key) {
+        bail!("recovery_required: process observation failed after spawn");
+    }
     let receipt = make_receipt(op, result)?;
     journal.receipt(key, serde_json::to_value(&receipt)?)?;
     Ok(receipt)

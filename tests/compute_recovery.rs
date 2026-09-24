@@ -728,3 +728,107 @@ fn journal_recovery_rejects_oversized_records_and_incomplete_large_tail() {
         .is_err());
     }
 }
+
+#[tokio::test]
+async fn bash_run_returns_exit_and_first_page_without_killing_for_page_limit() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(3));
+    let result = p
+        .execute(
+            "bash.run",
+            &args(json!({"command":"printf abcdef", "limit":3})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["status"], "exited");
+    assert_eq!(result["returncode"], 0);
+    assert_eq!(result["output"], "abc");
+    assert_eq!(result["offset"], 0);
+    assert_eq!(result["next_offset"], 3);
+    assert_eq!(result["omitted_after"], 3);
+    let rest = p
+        .execute(
+            "bash.read",
+            &args(json!({"handle_id":result["id"],"offset":3})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(rest["output"], "def");
+    p.cleanup(&mut j).unwrap();
+}
+
+#[tokio::test]
+async fn bash_run_yield_preserves_process_for_later_wait() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(3));
+    let result = p
+        .execute(
+            "bash.run",
+            &args(json!({"command":"sleep 0.15; printf done", "yield_seconds":0})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["status"], "running");
+    assert_eq!(result["timed_out"], false);
+    let end = p
+        .execute(
+            "bash.wait",
+            &args(json!({"handle_id":result["id"]})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(end["returncode"], 0);
+    p.cleanup(&mut j).unwrap();
+}
+
+#[tokio::test]
+async fn bash_run_invalid_observation_never_spawns() {
+    for extra in [
+        json!({"yield_seconds":-1}),
+        json!({"yield_seconds":"bad"}),
+        json!({"limit":0}),
+        json!({"limit":1.5}),
+    ] {
+        let (_root, b) = setup();
+        let mut j = open(&b);
+        let mut p = process::Processes::new(&j, Duration::from_secs(3));
+        let mut request = args(extra);
+        request.insert("command".into(), json!("touch effect"));
+        assert!(p.execute("bash.run", &request, &mut j).await.is_err());
+        p.cleanup(&mut j).unwrap();
+        assert!(!b.workspace.join("effect").exists());
+        assert!(j.handles.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn bash_run_interrupted_wait_retains_operation_handle_and_refuses_replay() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(3));
+    let request = json!({"command":"printf once >> effect; sleep 1", "yield_seconds":2});
+    j.intent("run/tool", request.clone()).unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_millis(60),
+        p.execute_owned("bash.run", &args(request.clone()), &mut j, Some("run/tool")),
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(j.handles.len(), 1);
+    assert_eq!(
+        j.handles.values().next().unwrap()["operation_key"],
+        "run/tool"
+    );
+    assert!(j.intent("run/tool", request).is_err());
+    p.cleanup(&mut j).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(b.workspace.join("effect")).unwrap(),
+        "once"
+    );
+}

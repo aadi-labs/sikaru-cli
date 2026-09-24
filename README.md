@@ -100,7 +100,9 @@ validates input only: it does not create journals, make requests, or verify a
 saved resume journal. Global formatting options apply to generated API commands;
 native commands retain their documented JSON output contract.
 
-`doctor` checks the workspace and project read access. It does not certify
+`doctor` checks workspace read access, the required local shell, optional `rg` search,
+the CLI protocol, and authenticated project read access. Missing `rg` is advisory.
+It does not certify
 billing, agent readiness, write permissions, or sandbox isolation. No run is
 started. Native request failures provide safe next steps for authentication,
 access, missing resources, and billing without displaying arbitrary provider

@@ -83,7 +83,10 @@ impl Transport {
             journal_id: self.binding.journal_id.clone(),
             workspace_provenance: self.binding.workspace_provenance.clone(),
             protocol_version: ReadyInputProtocolVersion::SikaruComputeV1,
-            capabilities: vec![ReadyInputCapabilitiesItem::ComputeExecute],
+            capabilities: vec![
+                ReadyInputCapabilitiesItem::ComputeExecute,
+                ReadyInputCapabilitiesItem::BashRun,
+            ],
         }
     }
     pub async fn ready(&self, instance: &str, deadline: Instant) -> Result<Instant> {

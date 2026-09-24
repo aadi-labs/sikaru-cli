@@ -187,6 +187,8 @@ mod workflow {
     impl Oracle {
         fn fault(&self, path: &str) -> Option<ResponseTemplate> {
             match (self.scenario, path.rsplit('/').next().unwrap()) {
+                ("release", "execution-sessions") => Some(ResponseTemplate::new(409).set_body_json(json!({"detail":"agent_release_unavailable", "message":"secret-remote-body"}))),
+                ("conflict", "execution-sessions") => Some(ResponseTemplate::new(409).set_body_json(json!({"detail":"different_conflict", "message":"secret-remote-body"}))),
                 ("billing", "execution-sessions") => {
                     Some(ResponseTemplate::new(402).set_body_string("secret-provider-token"))
                 }
@@ -358,6 +360,32 @@ mod workflow {
         .await;
         assert_ne!(code, 0);
         assert_eq!(state.lock().unwrap().sessions, 1);
+    }
+
+    #[tokio::test]
+    async fn unavailable_release_is_definite_no_start_but_other_conflicts_are_uncertain() {
+        for scenario in ["release", "conflict"] {
+            let (server, state, dir) = setup(scenario).await;
+            let (_, result) = launch(
+                &server,
+                dir.path(),
+                &["--agent", "agent", "--prompt", "task"],
+            )
+            .await;
+            assert_eq!(state.lock().unwrap().sessions, 0);
+            assert_eq!(state.lock().unwrap().environments, 0);
+            assert!(result["state_dir"].is_string());
+            assert!(!result.to_string().contains("secret-remote-body"));
+            if scenario == "release" {
+                assert_eq!(result["reason"], "agent_release_unavailable");
+                assert_eq!(result["cleanup"], "not_started");
+                assert_eq!(result["status"], "failed");
+                assert!(result["help"].as_str().unwrap().contains("upgrade"));
+            } else {
+                assert_eq!(result["status"], "recovery_required");
+                assert_eq!(result["cleanup"], "unconfirmed");
+            }
+        }
     }
 
     #[tokio::test]
@@ -547,6 +575,43 @@ mod workflow {
         assert_eq!(result["dry_run"], true);
         assert_eq!(state.lock().unwrap().sessions, 0);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn doctor_warns_for_missing_optional_search_without_failing_readiness() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/v1/projects/project/managed-agents",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"agents":[]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+            .env("SIKARU_API_KEY", "test-key")
+            .env("PATH", "")
+            .args([
+                "--base-url",
+                &server.uri(),
+                "doctor",
+                "--project",
+                "project",
+            ])
+            .output()
+            .await
+            .unwrap();
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(output.status.success(), "{result}");
+        let search = result["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "local_search")
+            .unwrap();
+        assert_eq!(search["ok"], false);
+        assert_eq!(search["required"], false);
+        assert!(result["scope"].as_str().unwrap().contains("not checked"));
     }
 
     #[tokio::test]
