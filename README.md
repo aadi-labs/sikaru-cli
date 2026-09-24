@@ -88,7 +88,7 @@ steering during execution are not yet supported.
 
 Use `sikaru exec --print "Task"` (or `-p`) to run one task and exit with a JSON
 result, including when launched from a terminal. Non-terminal stdin automatically
-selects this mode, preserving existing scripts and evaluation adapters. Redirected
+selects this mode, preserving existing scripts and integrations. Redirected
 stdout also receives the last JSON result when an interactive conversation ends.
 A normal terminal conversation omits that final JSON dump. Exit codes are unchanged.
 
@@ -170,17 +170,7 @@ an ambiguous result. Preserve worker state across restarts. Revoked worker crede
 require controller teardown if reporting cleanup can no longer authenticate.
 
 Local commands use the caller's OS permissions; a workspace is not isolation.
-Task and launcher child environments strip `SIKARU_*` control credentials. The
-managed agent and its private instructions remain hosted by Sikaru.
-
-## Harbor and Pier evaluation
-
-The authored [Sikaru evaluation adapters](client-extensions/eval/README.md) launch
-`sikaru exec` inside each runner's task environment while the agent stays hosted.
-Install `./client-extensions/eval[harbor,pier]` in the runner's Python environment,
-then select `sikaru_eval.harbor:SikaruAgent` or `sikaru_eval.pier:SikaruAgent`.
-The guide includes pinned binary installation, credentials, FrontierHarness
-command templates, cancellation and result accounting.
+Task and launcher child environments strip `SIKARU_*` control credentials. The agent runs through the Sikaru service.
 
 ## Verify
 
@@ -313,9 +303,7 @@ characters remain within the receipt's serialized size limit.
 
 ### Command definitions
 
-The CLI ships generated Rust command definitions and its API client. The source
-OpenAPI specification is maintained and compiled in Sikaru's private build
-pipeline; it is not included in this repository or the executable. Use `--help`
+The CLI ships generated command definitions and its API client. Use `--help`
 and command-level `--schema` for supported operations and inputs. The generic
 `--spec` and `--spec-raw` options report that no specification is embedded.
 
@@ -329,4 +317,4 @@ Input tokens include cached input; `n_cache_tokens` is that cached subset.
 reported token sums then describe only observed calls. Missing values remain null.
 Cost uses Sikaru's resource tariff, separately from `chargeable_cost_usd`.
 Complimentary billing does not erase token measurements or metered cost.
-These figures are neither provider invoices nor benchmark-normalized prices.
+These figures describe Sikaru resource usage; they are not a payment receipt.
