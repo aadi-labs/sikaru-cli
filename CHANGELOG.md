@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.7
+
+- Update the CLI package version; commands and public API behavior are unchanged.
+
 ## 0.2.6
 
 - Improve diagnostic error reporting while keeping server response details private.
