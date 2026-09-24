@@ -158,8 +158,6 @@ def test_managed_policy_and_pier_network(trial):
     agent, _, _ = trial
     if hasattr(agent, "network_allowlist"):
         assert agent.network_allowlist().domains == ["api.sikaru.ai"]
-    with pytest.raises(ValueError, match="owns model policy"):
-        type(agent)(logs_dir=agent.logs_dir, model_name="kimi-k3")
 
 
 def test_runner_factory_and_explicit_usage(trial):
@@ -250,3 +248,27 @@ prompt = pathlib.Path""",
         await task
     assert context.metadata["sikaru"]["cancel_acknowledged"] is True
     assert context.metadata["sikaru"]["cleanup"] == "confirmed"
+
+
+async def test_selected_model_and_headless_mode_reach_cli(trial):
+    agent, env, context = trial
+    selected = type(agent)(logs_dir=agent.logs_dir, project="project", agent="agent",
+        model_name="kimi-k3", binary_path=agent.binary_path)
+    selected.remote = agent.remote
+    agent = selected
+    assert agent.to_agent_info().model_info.name == "kimi-k3"
+    binary = Path(agent.binary_path)
+    source = binary.read_text().replace('args = sys.argv', 'args = sys.argv\nassert "--print" in args\nassert args[args.index("--model") + 1] == "kimi-k3"')
+    binary.write_text(source)
+    await agent.setup(env)
+    await agent.run("change workspace", env, context)
+    assert (env.workspace / "observed.txt").read_text() == "change workspace"
+    assert context.metadata["sikaru"]["model_policy"] == "kimi-k3"
+
+
+def test_partial_measurements_are_preserved_without_claiming_complete_totals(trial):
+    agent, _, context = trial
+    agent._usage({"available": True, "usage": {"complete": False, "n_input_tokens": 100},
+                  "cost": {"cost_usd": None, "observed_cost_usd": 0.5}}, context)
+    assert context.n_input_tokens is None
+    assert context.cost_usd is None

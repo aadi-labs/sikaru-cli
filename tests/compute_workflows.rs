@@ -90,9 +90,13 @@ mod workflow {
                 );
             }
             if path.contains("/runs/") {
-                return ok(
-                    json!({"runId":"run","status":"completed","eventsUrl":"events","harnessId":"agent","harnessVersionId":"version"}),
-                );
+                let mut result = json!({"runId":"run","status":"completed","eventsUrl":"events","harnessId":"agent","harnessVersionId":"version"});
+                if self.scenario == "completedresume" {
+                    result["usageSummary"] = json!({"complete":true,"n_input_tokens":100,"n_cache_tokens":20,"n_output_tokens":10});
+                    result["costSummary"] = json!({"cost_usd":0.001,"chargeable_cost_usd":0});
+                    result["latencyMs"] = json!(125);
+                }
+                return ok(result);
             }
             self.lifecycle(r, &mut s, path, body)
         }
@@ -508,6 +512,7 @@ mod workflow {
         } else {
             assert!(progress.contains("You>"));
             assert!(progress.contains("Working…"));
+            assert!(progress.contains("Tokens: 100 input (20 cached), 10 output."));
             assert!(!progress.contains("turn_submitted"));
         }
         assert_eq!(state.lock().unwrap().sessions, 1);
@@ -523,6 +528,10 @@ mod workflow {
         );
         let result: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(result["status"], "completed");
+        assert_eq!(result["usage"]["usage"]["n_input_tokens"], 100);
+        assert_eq!(result["usage"]["cost"]["cost_usd"], 0.001);
+        assert_eq!(result["usage"]["cost"]["chargeable_cost_usd"], 0);
+        assert_eq!(result["result"]["latencyMs"].as_f64(), Some(125.0));
     }
 
     #[tokio::test]

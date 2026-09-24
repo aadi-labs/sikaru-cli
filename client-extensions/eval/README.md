@@ -48,8 +48,11 @@ Each agent instance starts exactly one fresh session; it never resumes or retrie
 an uncertain execution. Automatic improvement is not enabled by this adapter.
 Task MCP servers, injected skills and trajectory loading are rejected explicitly.
 
-Sikaru controls the managed model policy. Omit `--model` or use the descriptive
-label `sikaru-managed`; other model values are rejected instead of silently ignored.
+Pass the runner's `--model` to select any supported Sikaru catalog model. The
+adapter forwards it to `sikaru exec --print --model MODEL`; omitting it inherits
+the project default. The legacy `sikaru-managed` label also means project default.
+Use `SIKARU_PROJECT` and `SIKARU_AGENT` as in the CLI; the older `_ID` names
+remain accepted. Model validation belongs to the public Sikaru API.
 
 ## FrontierHarness
 
@@ -69,26 +72,25 @@ binary path with the staged Linux artifact):
 FH=skills/frontierharness-eval/scripts
 bash "$FH/run-trials.sh" --checkpoint YOUR_CHECKPOINT --run-id sikaru-terminal \
   --harness sikaru --tasks terminal-tasks.txt --out runs \
-  --provider custom --model sikaru-managed \
+  --provider custom --model kimi-k3 \
   --secret-name SIKARU_API_KEY --secret-host api.sikaru.ai \
-  --cmd 'harbor run -d terminal-bench@2.0 -i {task} --agent sikaru_eval.harbor:SikaruAgent --ak binary_path=/opt/sikaru/sikaru --jobs-dir {jobs} --extra-docker-compose /work/runta-ca-overlay.yaml -r 0 -y'
+  --cmd 'harbor run -d terminal-bench@2.0 -i {task} --agent sikaru_eval.harbor:SikaruAgent --model {model} --ak binary_path=/opt/sikaru/sikaru --jobs-dir {jobs} --extra-docker-compose /work/runta-ca-overlay.yaml -r 0 -y'
 ```
 
 Use a task list containing **only Terminal-Bench selections** for that command.
 For DeepSWE, use a separate task selection and run ID, and replace `--cmd` with:
 
 ```sh
-'pier run -p /work/deep-swe/tasks/{task} --agent-import-path sikaru_eval.pier:SikaruAgent --ak binary_path=/opt/sikaru/sikaru --jobs-dir {jobs} -r 0'
+'pier run -p /work/deep-swe/tasks/{task} --agent-import-path sikaru_eval.pier:SikaruAgent --model {model} --ak binary_path=/opt/sikaru/sikaru --jobs-dir {jobs} -r 0'
 ```
 
 Check the upstream script's current provision/provider/secret arguments as well:
 [FrontierHarness reference](https://github.com/frontier-harness-eval/eval/blob/main/skills/frontierharness-eval/reference.md).
-The command override deliberately omits `{model}` because it cannot select
-Sikaru's serving model. Record hosted service version/resource limits, managed
+The command override passes `{model}` through the ordinary public interface. Record hosted service version/resource limits, managed
 model policy, fresh-session behavior, egress and task environment in the manifest.
 These runs evaluate the Sikaru service. They do not establish equivalence to the
 published Kimi K3 harness-only baseline; use matched controls for comparison.
-The upstream script warns about non-Kimi model labels; retain that disclosure.
+Use a catalog model name matching the intended provider route.
 Disable runner retries when running these agents so a new runner instance does
 not replay an uncertain trial. FrontierHarness also requires measured model
 usage for a scored verifier outcome: a deployment returning unavailable usage
@@ -129,3 +131,11 @@ uv build client-extensions/eval
 Tests exercise the actual pinned runner classes with subprocess/file transport
 and a deterministic CLI fixture. They do not contact Sikaru or claim benchmark
 scores. Start live acceptance with one task from each suite before a full sweep.
+
+Public run summaries expose durable measured usage independently of chargeability.
+`cost_usd` uses Sikaru's resource tariff; it is not provider cost or standardized
+benchmark cost. `chargeable_cost_usd` is zero for complimentary receipts. Calculate
+benchmark prices separately from measured tokens. Partial usage (`complete=false`)
+stays in evidence and is not promoted to complete runner totals. Per-call ledger
+timestamps do not establish provider execution order; first-call cache correction
+requires additional ordered evidence.

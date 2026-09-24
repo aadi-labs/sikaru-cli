@@ -39,10 +39,22 @@ class SikaruAgentMixin:
         skills_dir=None,
         **kwargs,
     ):
-        if model_name not in (None, "sikaru-managed"):
-            raise ValueError(
-                "Sikaru owns model policy; omit --model or use sikaru-managed"
-            )
+        extra_env = self._options(mcp_servers, skills_dir, kwargs)
+        self.requested_model = None if model_name == "sikaru-managed" else model_name
+        self.project = project or os.environ.get("SIKARU_PROJECT") or os.environ.get("SIKARU_PROJECT_ID")
+        self.agent = agent or os.environ.get("SIKARU_AGENT") or os.environ.get("SIKARU_AGENT_ID")
+        self.base_url = base_url or os.environ.get(
+            "SIKARU_BASE_URL", "https://api.sikaru.ai"
+        )
+        self._validate_config(extra_env, timeout_sec, cleanup_timeout_sec)
+        self.binary, self.binary_path, self.workspace = binary, binary_path, workspace
+        self.remote = f"/tmp/sikaru-eval-{uuid4().hex}"
+        self._started = False
+        self._cli_version = None
+        super().__init__(logs_dir=Path(logs_dir), model_name=self.requested_model or "sikaru-managed", **kwargs)
+
+    @staticmethod
+    def _options(mcp_servers, skills_dir, kwargs):
         if mcp_servers or skills_dir or kwargs.get("load_trajectory"):
             raise ValueError("Task MCP, skills and trajectory loading are unsupported")
         allowed = {
@@ -57,19 +69,10 @@ class SikaruAgentMixin:
         extra_env = kwargs.pop("extra_env", None) or {}
         if set(extra_env) - {"SIKARU_API_KEY"}:
             raise ValueError("Only SIKARU_API_KEY is accepted in extra_env")
-        self.project = project or os.environ.get("SIKARU_PROJECT_ID")
-        self.agent = agent or os.environ.get("SIKARU_AGENT_ID")
-        self.base_url = base_url or os.environ.get(
-            "SIKARU_BASE_URL", "https://api.sikaru.ai"
-        )
-        parsed = urlsplit(self.base_url)
-        if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-        ):
-            raise ValueError("base_url must be an HTTP(S) endpoint without credentials")
+        return extra_env
+
+    def _validate_config(self, extra_env, timeout_sec, cleanup_timeout_sec):
+        self._validate_url()
         if not self.project or not self.agent:
             raise ValueError(
                 "Set project and agent, or SIKARU_PROJECT_ID and SIKARU_AGENT_ID"
@@ -81,11 +84,16 @@ class SikaruAgentMixin:
         self.cleanup_timeout = int(cleanup_timeout_sec)
         if not 1 <= self.timeout <= 86400 or not 1 <= self.cleanup_timeout <= 300:
             raise ValueError("timeout_sec must be 1..86400; cleanup_timeout_sec 1..300")
-        self.binary, self.binary_path, self.workspace = binary, binary_path, workspace
-        self.remote = f"/tmp/sikaru-eval-{uuid4().hex}"
-        self._started = False
-        self._cli_version = None
-        super().__init__(logs_dir=Path(logs_dir), model_name="sikaru-managed", **kwargs)
+
+    def _validate_url(self):
+        parsed = urlsplit(self.base_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+        ):
+            raise ValueError("base_url must be an HTTP(S) endpoint without credentials")
 
     @staticmethod
     def name():
@@ -130,21 +138,13 @@ class SikaruAgentMixin:
         text = json.dumps(value, indent=2) if not isinstance(value, str) else value
         (self.logs_dir / name).write_text(text.replace(self._key, "[REDACTED]"))
 
-    async def run(self, instruction, environment, context):
-        if self._started:
-            raise SikaruExecutionError(
-                "A trial cannot be replayed; create a new agent for a new trial"
-            )
-        self._started = True
-        with tempfile.TemporaryDirectory() as directory:
-            prompt = Path(directory) / "instruction.txt"
-            prompt.write_text(instruction)
-            await environment.upload_file(prompt, f"{self.remote}/instruction.txt")
+    def _arguments(self):
         args = [
             self.binary,
             "--base-url",
             self.base_url,
             "exec",
+            "--print",
             "--project",
             self.project,
             "--agent",
@@ -158,6 +158,21 @@ class SikaruAgentMixin:
             "--timeout",
             str(self.timeout),
         ]
+        if self.requested_model:
+            args.extend(["--model", self.requested_model])
+        return args
+
+    async def run(self, instruction, environment, context):
+        if self._started:
+            raise SikaruExecutionError(
+                "A trial cannot be replayed; create a new agent for a new trial"
+            )
+        self._started = True
+        with tempfile.TemporaryDirectory() as directory:
+            prompt = Path(directory) / "instruction.txt"
+            prompt.write_text(instruction)
+            await environment.upload_file(prompt, f"{self.remote}/instruction.txt")
+        args = self._arguments()
         # exec keeps this shell's PID. The unique state argument lets cancellation
         # verify ownership before signaling on Linux, rather than trusting a PID.
         command = (
@@ -173,7 +188,7 @@ class SikaruAgentMixin:
                 "agent_id": self.agent,
                 "remote_evidence": self.remote,
                 "cleanup": "unconfirmed",
-                "model_policy": "sikaru-managed",
+                "model_policy": self.requested_model or "project-default",
             },
         }
         self._write("sikaru-adapter.json", context.metadata["sikaru"])
@@ -203,6 +218,10 @@ class SikaruAgentMixin:
                 await self._collect(environment, context)
             raise
         await self._collect(environment, context)
+        self._require_completed(result, context)
+
+    @staticmethod
+    def _require_completed(result, context):
         evidence = context.metadata["sikaru"]
         if (
             result.return_code != 0
@@ -268,12 +287,16 @@ class SikaruAgentMixin:
         if not isinstance(payload, dict) or payload.get("available") is not True:
             return
         usage, cost = payload.get("usage"), payload.get("cost")
-        if isinstance(usage, dict):
-            for key in ("n_input_tokens", "n_cache_tokens", "n_output_tokens"):
-                value = usage.get(key)
-                if type(value) is int and value >= 0:
-                    setattr(context, key, value)
+        if isinstance(usage, dict) and usage.get("complete") is not False:
+            SikaruAgentMixin._token_usage(usage, context)
         if isinstance(cost, dict):
             value = cost.get("cost_usd")
             if type(value) in (int, float) and math.isfinite(value) and value >= 0:
                 context.cost_usd = value
+
+    @staticmethod
+    def _token_usage(usage, context):
+        for key in ("n_input_tokens", "n_cache_tokens", "n_output_tokens"):
+            value = usage.get(key)
+            if type(value) is int and value >= 0:
+                setattr(context, key, value)

@@ -120,10 +120,28 @@ pub fn render(result: &Value) {
     } else if !output.is_null() {
         eprintln!("\nSikaru> {output}");
     }
+    render_usage(result);
     if let Some(path) = result["state_dir"].as_str() {
         eprintln!("Saved session: {path}");
     }
     if let Some(help) = result["help"].as_str() {
         eprintln!("{help}");
+    }
+}
+
+fn render_usage(result: &Value) {
+    let usage = &result["usage"]["usage"];
+    let counts = (
+        usage["n_input_tokens"].as_u64(),
+        usage["n_cache_tokens"].as_u64(),
+        usage["n_output_tokens"].as_u64(),
+    );
+    if let (Some(input), Some(cached), Some(output)) = counts {
+        let coverage = if usage["complete"] == false {
+            " (partial)"
+        } else {
+            ""
+        };
+        eprintln!("Tokens{coverage}: {input} input ({cached} cached), {output} output.");
     }
 }

@@ -318,3 +318,15 @@ OpenAPI specification is maintained and compiled in Sikaru's private build
 pipeline; it is not included in this repository or the executable. Use `--help`
 and command-level `--schema` for supported operations and inputs. The generic
 `--spec` and `--spec-raw` options report that no specification is embedded.
+
+### Run measurements
+
+`exec --print` includes public run measurements in `usage.usage` and `usage.cost`,
+and run wall time in `result.latencyMs` when the hosted run has completed.
+The same measurements are available from the public run API and generated SDKs.
+Input tokens include cached input; `n_cache_tokens` is that cached subset.
+`complete=false` means some reserved operations lack a settled measurement;
+reported token sums then describe only observed calls. Missing values remain null.
+Cost uses Sikaru's resource tariff, separately from `chargeable_cost_usd`.
+Complimentary billing does not erase token measurements or metered cost.
+These figures are neither provider invoices nor benchmark-normalized prices.
