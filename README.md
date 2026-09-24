@@ -61,24 +61,38 @@ sikaru auth login
 export SIKARU_PROJECT=YOUR_PROJECT_ID
 export SIKARU_AGENT=YOUR_AGENT_SLUG
 sikaru doctor
-sikaru chat
+sikaru exec
+sikaru exec --model kimi-k3
 sikaru exec "Fix the failing tests"
+sikaru exec --model deepseek-v4p1-flash "Fix the failing tests"
 cat task.txt | sikaru exec -
 sikaru exec --dry-run "Check this task before starting"
 ```
 
 `--project` and `--agent` override the environment defaults. The workspace defaults
 to the current directory; use `-C PATH`, `--cd PATH`, or `--workspace PATH` to
-select another existing directory. The hosted Sikaru model remains managed.
+select another existing directory. `--model` (or `-m`) selects a catalog model for
+the new session; omitting it inherits the project default. The selection applies
+to subsequent turns without changing the project or another session. Provider
+credentials remain managed by Sikaru. Resume retains the original model; start a
+new session to select a different one. No revision pin or evaluation mode is needed.
 
-`chat` is a terminal conversation with `/help`, `/status`, and `/exit`. Each
-message continues the same durable session. It shows completed replies and the
-state directory on stderr; a final JSON result stays on stdout. It stops on
-approval, cancellation, failure, or uncertain recovery. Resume explicitly with
-`sikaru chat --resume STATE_DIRECTORY` in the original workspace. This is a simple
-line-based interface, not a full-screen editor or a token-by-token text renderer.
+`exec` opens a terminal conversation with `/help`, `/status`, and `/exit`.
+An optional launch prompt starts the first task immediately; each follow-up
+continues the same durable session and can involve many model calls and tool
+actions. `chat` remains a compatibility alias. Completed replies and the state
+directory appear on stderr. It stops on approval, cancellation, failure, or
+uncertain recovery. Resume with `sikaru exec --resume STATE_DIRECTORY` in the
+original workspace. This is a line-based interface; live token rendering and
+steering during execution are not yet supported.
 
-`exec` retains its single JSON result and existing exit codes. Supply one of a
+Use `sikaru exec --print "Task"` (or `-p`) to run one task and exit with a JSON
+result, including when launched from a terminal. Non-terminal stdin automatically
+selects this mode, preserving existing scripts and evaluation adapters. Redirected
+stdout also receives the last JSON result when an interactive conversation ends.
+A normal terminal conversation omits that final JSON dump. Exit codes are unchanged.
+
+Supply one of a
 positional prompt, `--prompt`, or `--prompt-file`. Use `-` as the positional prompt
 or prompt-file to read stdin explicitly. Empty input fails before local or remote
 state is created. File/stdin prompts must be UTF-8 and at most 1 MiB. A dry run

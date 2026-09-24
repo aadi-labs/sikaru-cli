@@ -15,6 +15,8 @@ use tokio::{sync::watch, time::Instant};
 struct Saved {
     project: String,
     agent: String,
+    #[serde(default)]
+    model: Option<String>,
     anchor: Anchor,
     key: String,
     session: Option<String>,
@@ -30,7 +32,13 @@ struct Saved {
 }
 pub fn command() -> clap::Command {
     clap::Command::new("exec")
-        .about("Run an agent in an existing local workspace")
+        .alias("chat")
+        .about("Work with an agent conversationally; use --print for a single JSON result")
+        .after_help("In a terminal, each message continues the same session. Commands: /help, /status, /exit.\nPiped input and --print run one task and exit. Local commands run with your OS permissions.")
+        .arg(clap::Arg::new("print").long("print").short('p').action(clap::ArgAction::SetTrue)
+            .help("Run one task, emit its JSON result, and exit"))
+        .arg(clap::Arg::new("model").long("model").short('m')
+            .help("Session default model, e.g. kimi-k3; omitted uses the project default"))
         .arg(
             clap::Arg::new("project")
                 .long("project")
@@ -111,12 +119,17 @@ pub async fn execute(
         return Ok(
             json!({"status":"completed","dry_run":true,"workspace":workspace,
             "project":m.get_one::<String>("project"),"agent":m.get_one::<String>("agent"),
+            "model":m.get_one::<String>("model"),
             "resume":m.get_one::<String>("resume"),"cleanup":"not_started",
             "usage":{"available":false},"scope":"Input validation only; does not verify remote readiness or resume journal."}),
         );
     }
     let (mut saved, path) = open_state(m, &workspace)?;
-    eprintln!("{}", json!({"event":"workspace_opened","state_dir":path}));
+    runtime::progress(
+        super::chat::is_interactive(m),
+        "Opening workspace…",
+        json!({"event":"workspace_opened","state_dir":path}),
+    );
     let client = crate::sdk::client(ctx);
     let outcome = execute_saved(m, ctx, &client, &mut saved, &path, text).await;
     let mut result = outcome
@@ -151,6 +164,7 @@ fn open_state(
         Some(Saved {
             project,
             agent: m.get_one::<String>("agent").unwrap().clone(),
+            model: m.get_one::<String>("model").cloned(),
             anchor: Anchor::capture(workspace)?,
             key,
             session: None,
@@ -183,6 +197,13 @@ fn resume_state(
     Ok((saved, path))
 }
 fn validate_resume(m: &clap::ArgMatches, saved: &Saved, path: &std::path::Path) -> Result<()> {
+    if let Some(model) = m.get_one::<String>("model") {
+        if saved.model.as_ref() != Some(model) {
+            bail!(
+                "Resumed sessions retain their model. Start a new session to use --model {model}."
+            );
+        }
+    }
     if saved.executor_started
         && (!saved.clean || !path.join("executor").join("journal.jsonl").is_file())
     {
@@ -205,6 +226,7 @@ async fn provision(m: &clap::ArgMatches, c: &ApiClient, s: &mut State<Saved>) ->
                 tenant_id: m.get_one::<String>("tenant").unwrap().clone(),
                 user_id: m.get_one::<String>("user").unwrap().clone(),
                 idempotency_key: Some(s.value.key.clone()),
+                model: s.value.model.clone(),
                 ..Default::default()
             },
             None,
@@ -269,9 +291,10 @@ async fn execute_saved(
     }
     provision(m, c, s).await?;
     let a = s.value.attachment.clone().context("missing attachment")?;
-    eprintln!(
-        "{}",
-        json!({"event":"attachment_created","session_id":a.session_id,"attachment_id":a.id,"state_dir":path})
+    runtime::progress(
+        super::chat::is_interactive(m),
+        "Connecting session…",
+        json!({"event":"attachment_created","session_id":a.session_id,"attachment_id":a.id,"state_dir":path}),
     );
     validate_remote(c, s, &a).await?;
     let bootstrap = acquire_bootstrap(c, s, &a, path).await?;
@@ -362,6 +385,7 @@ async fn run_attached(
         timeout: Some(Duration::from_secs(*m.get_one::<u64>("timeout").unwrap())),
         stop: Some(receiver),
         admission: Some(admission),
+        interactive: super::chat::is_interactive(m),
     };
     let http = ctx.http_config().build_client()?;
     let serving = async {
@@ -371,7 +395,8 @@ async fn run_attached(
         result
     };
     let submission = async {
-        let result = submit_when_ready(c, s, &a, text, stop.clone()).await;
+        let result =
+            submit_when_ready(c, s, &a, text, stop.clone(), super::chat::is_interactive(m)).await;
         if result.is_ok() {
             let _ = admitted.send(true);
         }
@@ -420,8 +445,9 @@ async fn submit_when_ready(
     a: &AttachmentView,
     text: Option<String>,
     stop: watch::Sender<bool>,
+    interactive: bool,
 ) -> Result<()> {
-    let outcome = submit(c, s, a, text, stop.subscribe()).await;
+    let outcome = submit(c, s, a, text, stop.subscribe(), interactive).await;
     if outcome.is_err() {
         let _ = stop.send(true);
     }
@@ -433,6 +459,7 @@ async fn submit(
     a: &AttachmentView,
     text: Option<String>,
     stopped: watch::Receiver<bool>,
+    interactive: bool,
 ) -> Result<()> {
     let Some(text) = text else {
         return Ok(());
@@ -464,9 +491,10 @@ async fn submit(
             .to_owned(),
     );
     s.save()?;
-    eprintln!(
-        "{}",
-        json!({"event":"turn_submitted","session_id":a.session_id,"attachment_id":a.id,"run_id":s.value.run_id})
+    runtime::progress(
+        interactive,
+        "Working…",
+        json!({"event":"turn_submitted","session_id":a.session_id,"attachment_id":a.id,"run_id":s.value.run_id}),
     );
     Ok(())
 }

@@ -4,8 +4,9 @@ use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct ResourceBudget {
-    #[serde(default)]
-    pub limit_usd: String,
+    /// Spending cap in USD; null means uncapped complimentary usage
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_usd: Option<String>,
     #[serde(default)]
     pub reserved_usd: String,
     #[serde(default)]
@@ -44,12 +45,11 @@ impl ResourceBudgetBuilder {
 
     /// Consumes the builder and constructs a [`ResourceBudget`].
     /// This method will fail if any of the following fields are not set:
-    /// - [`limit_usd`](ResourceBudgetBuilder::limit_usd)
     /// - [`reserved_usd`](ResourceBudgetBuilder::reserved_usd)
     /// - [`used_usd`](ResourceBudgetBuilder::used_usd)
     pub fn build(self) -> Result<ResourceBudget, BuildError> {
         Ok(ResourceBudget {
-            limit_usd: self.limit_usd.ok_or_else(|| BuildError::missing_field("limit_usd"))?,
+            limit_usd: self.limit_usd,
             reserved_usd: self.reserved_usd.ok_or_else(|| BuildError::missing_field("reserved_usd"))?,
             used_usd: self.used_usd.ok_or_else(|| BuildError::missing_field("used_usd"))?,
         })

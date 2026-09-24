@@ -469,6 +469,7 @@ impl ExecutionSessionsClient {
     ///                 environment: None,
     ///                 final_output_schema: None,
     ///                 idempotency_key: None,
+    ///                 model: None,
     ///                 reasoning_effort: None,
     ///             },
     ///             None,

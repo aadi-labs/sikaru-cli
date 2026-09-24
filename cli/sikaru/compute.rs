@@ -57,20 +57,17 @@ pub fn install(app: CliApp) -> CliApp {
             .command(
                 workflow::command(),
                 OpenApiBinding::handler(|m, ctx| {
+                    let interactive = chat::is_interactive(m);
                     let result = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(workflow::execute(m, ctx))
+                        tokio::runtime::Handle::current().block_on(async {
+                            if interactive {
+                                chat::execute(m, ctx).await
+                            } else {
+                                workflow::execute(m, ctx).await
+                            }
+                        })
                     });
-                    emit(result);
-                    Ok(())
-                }),
-            )
-            .command(
-                chat::command(),
-                OpenApiBinding::handler(|m, ctx| {
-                    let result = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(chat::execute(m, ctx))
-                    });
-                    emit(result);
+                    emit_task(result, interactive);
                     Ok(())
                 }),
             )
@@ -125,6 +122,20 @@ async fn execute(
         }
         Some(("worker", options)) => worker::execute(options, ctx).await,
         _ => anyhow::bail!("choose compute serve or worker"),
+    }
+}
+#[cfg(unix)]
+fn emit_task(result: anyhow::Result<serde_json::Value>, interactive: bool) {
+    use std::io::IsTerminal;
+    if !interactive || !std::io::stdout().is_terminal() {
+        emit(result);
+        return;
+    }
+    let result =
+        result.unwrap_or_else(|error| diagnostics::failure(&error, "controller_or_resume_failed"));
+    if exit_code(&result) != 0 {
+        chat::render(&result);
+        std::process::exit(exit_code(&result));
     }
 }
 #[cfg(unix)]

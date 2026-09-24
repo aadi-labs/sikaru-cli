@@ -49,7 +49,7 @@ pub fn source(m: &ArgMatches) -> Result<Option<String>> {
 fn read_stdin() -> Result<String> {
     if std::io::stdin().is_terminal() {
         bail!(InvalidInput(
-            "Pipe a task to stdin when using '-'. For a conversation, use sikaru chat."
+            "Pipe a task to stdin when using '-'. For a conversation, use sikaru exec."
         ));
     }
     read_text(std::io::stdin())

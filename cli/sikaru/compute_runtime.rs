@@ -17,6 +17,7 @@ pub async fn serve(b: Bootstrap, base_url: String, http: reqwest::Client) -> Res
 }
 #[derive(Default)]
 pub struct RunOptions {
+    pub interactive: bool,
     pub approval_wait: Duration,
     pub timeout: Option<Duration>,
     pub stop: Option<watch::Receiver<bool>>,
@@ -40,9 +41,10 @@ pub async fn serve_with_options(
     let preparation = prepare(&transport, &mut journal, &processes, startup).await;
     let outcome = match preparation {
         Ok(deadline) => {
-            eprintln!(
-                "{}",
-                json!({"event":"executor_ready","attachment_id":b.attachment_id,"session_id":b.session_id})
+            progress(
+                options.interactive,
+                "Workspace ready.",
+                json!({"event":"executor_ready","attachment_id":b.attachment_id,"session_id":b.session_id}),
             );
             run(
                 transport.clone(),
@@ -434,4 +436,13 @@ async fn await_admission(admission: Option<watch::Receiver<bool>>) -> Result<()>
         }
     }
     Ok(())
+}
+
+/// Keep automation events machine-readable while giving terminal users progress.
+pub fn progress(interactive: bool, message: &str, event: Value) {
+    if interactive {
+        eprintln!("{message}");
+    } else {
+        eprintln!("{event}");
+    }
 }

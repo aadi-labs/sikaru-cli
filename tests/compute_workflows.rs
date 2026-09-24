@@ -28,6 +28,7 @@ mod workflow {
     #[derive(Default)]
     struct Server {
         sessions: usize,
+        models: Vec<Value>,
         environments: usize,
         attachments: HashMap<String, Value>,
         ready: bool,
@@ -56,6 +57,7 @@ mod workflow {
             let mut s = self.state.lock().unwrap();
             if path.ends_with("/execution-sessions") {
                 s.sessions += 1;
+                s.models.push(body["model"].clone());
                 return ok(json!({"session":{"id":format!("session-{}",s.sessions)}}));
             }
             if path.ends_with("/compute-environments") {
@@ -301,7 +303,14 @@ mod workflow {
             .env("SIKARU_API_KEY", "controller-secret")
             .env("SIKARU_PROJECT", "project")
             .env("SIKARU_AGENT", "agent")
-            .args(["--base-url", &server.uri(), "exec", "Write output"])
+            .args([
+                "--base-url",
+                &server.uri(),
+                "exec",
+                "--model",
+                "kimi-k3",
+                "Write output",
+            ])
             .output()
             .await
             .unwrap();
@@ -313,10 +322,38 @@ mod workflow {
         let result: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(result["status"], "completed");
         assert_eq!(state.lock().unwrap().sessions, 1);
+        assert_eq!(state.lock().unwrap().models, vec![json!("kimi-k3")]);
         assert_eq!(
             std::fs::read_to_string(dir.path().join("output.txt")).unwrap(),
             "native effect"
         );
+    }
+
+    #[tokio::test]
+    async fn conflicting_resume_model_is_rejected_without_creating_another_session() {
+        let (server, state, dir) = setup("completed").await;
+        let (code, result) = launch(
+            &server,
+            dir.path(),
+            &["--agent", "agent", "--model", "kimi-k3", "--prompt", "task"],
+        )
+        .await;
+        assert_eq!(code, 0, "{result}");
+        let (code, _) = launch(
+            &server,
+            dir.path(),
+            &[
+                "--resume",
+                result["state_dir"].as_str().unwrap(),
+                "--model",
+                "glm-5p3-flash",
+                "--prompt",
+                "next",
+            ],
+        )
+        .await;
+        assert_ne!(code, 0);
+        assert_eq!(state.lock().unwrap().sessions, 1);
     }
 
     #[tokio::test]
@@ -392,7 +429,21 @@ mod workflow {
     }
 
     #[tokio::test]
-    async fn terminal_chat_continues_one_session_for_two_turns() {
+    async fn terminal_exec_continues_one_session_for_two_turns() {
+        terminal_task("exec", false).await;
+    }
+
+    #[tokio::test]
+    async fn chat_alias_continues_the_same_session() {
+        terminal_task("chat", false).await;
+    }
+
+    #[tokio::test]
+    async fn terminal_print_exits_after_one_task() {
+        terminal_task("exec", true).await;
+    }
+
+    async fn terminal_task(command: &str, print: bool) {
         use std::io::Write;
         use std::os::fd::FromRawFd;
         let (server, state, dir) = setup("completedresume").await;
@@ -416,7 +467,9 @@ mod workflow {
             .args([
                 "--base-url",
                 &server.uri(),
-                "chat",
+                command,
+                "--model",
+                "kimi-k3",
                 "--project",
                 "project",
                 "--agent",
@@ -424,14 +477,21 @@ mod workflow {
                 "--workspace",
                 dir.path().to_str().unwrap(),
             ])
+            .args(if print {
+                vec!["--print", "first task"]
+            } else {
+                vec![]
+            })
             .stdin(terminal)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
             .unwrap();
-        input
-            .write_all(b"first task\nsecond task\n/exit\n")
-            .unwrap();
+        if !print {
+            input
+                .write_all(b"first task\nsecond task\n/exit\n")
+                .unwrap();
+        }
         let output = tokio::time::timeout(Duration::from_secs(35), child.wait_with_output())
             .await
             .unwrap()
@@ -441,11 +501,25 @@ mod workflow {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        let progress = String::from_utf8_lossy(&output.stderr);
+        if print {
+            assert!(!progress.contains("You>"));
+            assert!(progress.contains("turn_submitted"));
+        } else {
+            assert!(progress.contains("You>"));
+            assert!(progress.contains("Working…"));
+            assert!(!progress.contains("turn_submitted"));
+        }
         assert_eq!(state.lock().unwrap().sessions, 1);
-        assert_eq!(state.lock().unwrap().turns, 2);
+        assert_eq!(state.lock().unwrap().models, vec![json!("kimi-k3")]);
+        assert_eq!(state.lock().unwrap().turns, if print { 1 } else { 2 });
         assert_eq!(
             std::fs::read_to_string(dir.path().join("output.txt")).unwrap(),
-            "second effect"
+            if print {
+                "native effect"
+            } else {
+                "second effect"
+            }
         );
         let result: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(result["status"], "completed");

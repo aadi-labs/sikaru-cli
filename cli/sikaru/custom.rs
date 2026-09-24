@@ -5,5 +5,5 @@ use fern_cli_sdk::app::CliApp;
 mod compute;
 
 pub fn register(app: CliApp) -> CliApp {
-    compute::install(app.description("Run a hosted Sikaru agent in your workspace. Start with auth login, doctor, then chat. Use exec for scripts; all API commands remain available."))
+    compute::install(app.description("Run a hosted Sikaru agent in your workspace. Start with auth login, doctor, then exec. Use exec --print for scripts; all API commands remain available."))
 }

@@ -1,15 +1,15 @@
 //! A terminal conversation reuses the same durable hosted workflow for every turn.
 use super::{diagnostics, input, workflow};
 use anyhow::Result;
-use clap::{ArgMatches, Command};
+use clap::ArgMatches;
 use fern_cli_sdk::openapi::AppContext;
 use serde_json::{json, Value};
 use std::io::{IsTerminal, Write};
 
-pub fn command() -> Command {
-    workflow::command().name("chat")
-        .about("Talk to a managed agent in your current workspace")
-        .after_help("Commands: /help, /status, /exit. Each message continues the same session.\nUse exec for scripts and JSON results. Local commands run with your OS permissions.")
+pub fn is_interactive(m: &ArgMatches) -> bool {
+    std::io::stdin().is_terminal()
+        && !m.get_flag("print")
+        && m.try_get_one::<bool>("dry-run").ok().flatten() != Some(&true)
 }
 
 pub async fn execute(m: &ArgMatches, ctx: &AppContext) -> Result<Value> {
@@ -28,7 +28,7 @@ pub async fn execute(m: &ArgMatches, ctx: &AppContext) -> Result<Value> {
     let mut resume = m.get_one::<String>("resume").cloned();
     let mut text = input::source(m)?;
     let mut last = json!({"status":"completed","execution":null,"cleanup":"not_started","usage":{"available":false}});
-    eprintln!("Sikaru chat — /help for commands, /exit to leave.");
+    eprintln!("Sikaru — enter a task, /help for commands, /exit to leave.");
     loop {
         let Some(task) = next_task(text.take(), &last).await? else {
             return Ok(last);
@@ -85,7 +85,7 @@ async fn wait_for_input() -> bool {
 
 fn turn_matches(m: &ArgMatches, resume: Option<&str>, text: &str) -> Result<ArgMatches> {
     let mut args = vec!["exec".to_owned()];
-    for name in ["project", "agent", "workspace", "tenant", "user"] {
+    for name in ["project", "agent", "workspace", "tenant", "user", "model"] {
         if let Some(value) = m.get_one::<String>(name) {
             args.extend([format!("--{name}"), value.clone()]);
         }
@@ -109,7 +109,7 @@ fn add_state(args: &mut Vec<String>, m: &ArgMatches, resume: Option<&str>) {
     }
 }
 
-fn render(result: &Value) {
+pub fn render(result: &Value) {
     let output = &result["final_output"]["output"];
     if let Some(text) = output.as_str() {
         let safe: String = text
