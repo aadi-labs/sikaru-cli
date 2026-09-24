@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6
+
+- Improve diagnostic error reporting while keeping server response details private.
+
 ## 0.2.3
 
 - Refresh the generated client for the current public API.
