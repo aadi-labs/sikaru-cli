@@ -308,6 +308,9 @@ impl Journal {
         }
         Ok(())
     }
+    pub fn state_path(&self) -> &Path {
+        self.state_anchor.path()
+    }
     pub fn verify(&self) -> Result<()> {
         self.binding.anchor.verify()?;
         self.state_anchor.verify()

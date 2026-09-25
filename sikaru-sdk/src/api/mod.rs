@@ -12,17 +12,17 @@ pub mod resources;
 pub use resources::{
     ActivationClient, AgentBudgetsClient, AgentImportsClient, AgentsClient, ApiClient,
     ChangesetsClient, ComputeAttachmentsClient, ComputeCredentialsClient,
-    ComputeEnvironmentsClient, ComputeOperationsClient, ComputeWorkersClient, ConnectionsClient,
-    ContextRegistryClient, ConversationsClient, DeploymentsClient, EnvironmentsClient,
-    EvalSeedsClient, EvaluationComparisonsClient, EvaluationCriteriaClient, EvaluationJobsClient,
-    EvaluationResultsClient, EvaluatorRunsClient, ExecutionObjectivesClient,
-    ExecutionSessionsClient, ExecutionsClient, FeedbackClient, HarnessVersionsClient,
-    HarnessesClient, ImportSessionsClient, IssueClustersClient, JudgeAlignmentClient,
-    ManagedAgentsClient, MemoryRegistryClient, ModelGatewayClient, ModelSettingsClient,
-    OnlineEvaluationsClient, ReleaseWatchesClient, RetentionPoliciesClient, ReviewQueueClient,
-    RunSchedulesClient, RunWebhooksClient, RunsClient, SessionsClient, SpecialistsClient,
-    ToolProvidersClient, TraceImportConnectionsClient, TraceImportsClient, TraceStreamsClient,
-    WorkflowIntentsClient, WorkflowRunsClient, WorkflowsClient,
+    ComputeEnvironmentsClient, ComputeOperationsClient, ComputeWorkersClient,
+    ComputeWorkspacesClient, ConnectionsClient, ContextRegistryClient, ConversationsClient,
+    DeploymentsClient, EnvironmentsClient, EvalSeedsClient, EvaluationComparisonsClient,
+    EvaluationCriteriaClient, EvaluationJobsClient, EvaluationResultsClient, EvaluatorRunsClient,
+    ExecutionObjectivesClient, ExecutionSessionsClient, ExecutionsClient, FeedbackClient,
+    HarnessVersionsClient, HarnessesClient, ImportSessionsClient, IssueClustersClient,
+    JudgeAlignmentClient, ManagedAgentsClient, MemoryRegistryClient, ModelGatewayClient,
+    ModelSettingsClient, OnlineEvaluationsClient, ReleaseWatchesClient, RetentionPoliciesClient,
+    ReviewQueueClient, RunSchedulesClient, RunWebhooksClient, RunsClient, SessionsClient,
+    SpecialistsClient, ToolProvidersClient, TraceImportConnectionsClient, TraceImportsClient,
+    TraceStreamsClient, WorkflowIntentsClient, WorkflowRunsClient, WorkflowsClient,
 };
 
 pub use sikaru_types::*;

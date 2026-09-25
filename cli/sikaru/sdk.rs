@@ -68,6 +68,7 @@ pub fn client(ctx: &AppContext) -> sikaru_sdk::api::ApiClient {
         changesets: sikaru_sdk::api::ChangesetsClient { http_client: http_client.clone() },
         compute_attachments: sikaru_sdk::api::ComputeAttachmentsClient { http_client: http_client.clone() },
         compute_operations: sikaru_sdk::api::ComputeOperationsClient { http_client: http_client.clone() },
+        compute_workspaces: sikaru_sdk::api::ComputeWorkspacesClient { http_client: http_client.clone() },
         compute_credentials: sikaru_sdk::api::ComputeCredentialsClient { http_client: http_client.clone() },
         compute_environments: sikaru_sdk::api::ComputeEnvironmentsClient { http_client: http_client.clone() },
         compute_workers: sikaru_sdk::api::ComputeWorkersClient { http_client: http_client.clone() },

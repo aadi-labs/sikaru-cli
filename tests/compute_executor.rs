@@ -32,6 +32,8 @@ fn generated_api_commands_remain_available() {
 #[cfg(unix)]
 mod wire {
     use serde_json::{json, Value};
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeMap;
     use std::{
         process::Stdio,
         sync::{Arc, Mutex},
@@ -52,6 +54,13 @@ mod wire {
         duplicate: Option<Value>,
         reconciliations: Vec<Value>,
         lost_issued: bool,
+        ready_body: Option<Value>,
+        checkpoint_reads: usize,
+        tree_posts: usize,
+        tree: Option<Value>,
+        tree_id: Option<String>,
+        blobs: BTreeMap<String, Vec<u8>>,
+        checkpoint_events: Vec<&'static str>,
     }
     #[derive(Clone)]
     struct Oracle {
@@ -87,6 +96,9 @@ mod wire {
             }
             if path.ends_with("/receipts") {
                 return self.receipt(&mut state, body);
+            }
+            if path.contains("/workspace-checkpoints/") {
+                return self.checkpoint(&mut state, request, body);
             }
             self.lifecycle(&mut state, path, body)
         }
@@ -129,6 +141,7 @@ mod wire {
             let a = attachment("ready", if self.scenario == "expiry" { 1 } else { 3 });
             if path.ends_with("/ready") {
                 s.ready = true;
+                s.ready_body = Some(body);
                 return ok(a);
             }
             if path.ends_with("/connect") {
@@ -202,9 +215,7 @@ mod wire {
                 return ok(page).set_delay(Duration::from_secs(2));
             }
             if s.stage >= 4 {
-                page["execution"]["terminal"] = json!(true);
-                page["execution"]["status"] = json!("completed");
-                return ok(page);
+                return self.completed_work(s, page);
             }
             if self.scenario == "altered" && s.stage == 1 && !self.effect.exists() {
                 return ok(page);
@@ -212,6 +223,85 @@ mod wire {
             let op = self.next(s);
             page["operations"] = json!([op]);
             ok(page)
+        }
+        fn completed_work(&self, s: &mut State, mut page: Value) -> ResponseTemplate {
+            if self.scenario.starts_with("checkpoint") {
+                return self.checkpoint_page(s, page);
+            }
+            page["execution"]["terminal"] = json!(true);
+            page["execution"]["status"] = json!("completed");
+            ok(page)
+        }
+        fn checkpoint_view(&self, s: &State) -> Value {
+            json!({"checkpoint_id":"capture-one","run_id":"run",
+                "workspace_generation":"generation","owner_epoch":1,
+                "status":if s.tree.is_some() {"published"} else {"requested"},
+                "tree_id":s.tree_id})
+        }
+        fn checkpoint_page(&self, s: &mut State, mut page: Value) -> ResponseTemplate {
+            page["execution"]["status"] = json!("completed");
+            if s.tree.is_some() && s.checkpoint_events.last() == Some(&"ack") {
+                s.checkpoint_events.push("terminal");
+                page["execution_phase"] = json!("terminal");
+                page["execution"]["terminal"] = json!(true);
+            } else {
+                page["execution_phase"] = json!("checkpointing");
+                page["workspace_checkpoint"] = self.checkpoint_view(s);
+                if self.scenario == "checkpoint_generation" {
+                    page["workspace_checkpoint"]["workspace_generation"] = json!("replacement");
+                }
+            }
+            ok(page)
+        }
+        fn checkpoint(&self, s: &mut State, request: &Request, body: Value) -> ResponseTemplate {
+            let path = request.url.path();
+            assert!(path.contains("/workspace-checkpoints/run"));
+            if path.contains("/blobs/") {
+                assert_eq!(request.method.as_str(), "PUT");
+                assert!(request.body.len() <= 1_000_000);
+                let hash = path.rsplit('/').next().unwrap();
+                assert_eq!(hash, format!("{:x}", Sha256::digest(&request.body)));
+                s.blobs.insert(hash.into(), request.body.clone());
+                s.checkpoint_events.push("blob");
+                return ok(json!({"sha256":hash,"size":request.body.len()}));
+            }
+            if path.ends_with("/tree") {
+                return self.commit_tree(s, body);
+            }
+            assert_eq!(request.method.as_str(), "GET");
+            s.checkpoint_reads += 1;
+            s.checkpoint_events
+                .push(if s.tree.is_some() { "ack" } else { "read" });
+            ok(self.checkpoint_view(s))
+        }
+        fn commit_tree(&self, s: &mut State, body: Value) -> ResponseTemplate {
+            s.tree_posts += 1;
+            assert_eq!(s.tree_posts, 1, "uncertain commit must use status lookup");
+            let files = body["files"].as_object().unwrap();
+            assert_eq!(files.len(), 3);
+            for file in files.values() {
+                let mut bytes = Vec::new();
+                for chunk in file["chunks"].as_array().unwrap() {
+                    let data = &s.blobs[chunk["sha256"].as_str().unwrap()];
+                    assert_eq!(data.len() as u64, chunk["size"].as_u64().unwrap());
+                    bytes.extend(data);
+                }
+                assert_eq!(file["sha256"], format!("{:x}", Sha256::digest(&bytes)));
+                assert_eq!(file["size"], bytes.len());
+            }
+            s.tree_id = Some(canonical_tree_id(&body));
+            s.tree = Some(body);
+            s.checkpoint_events.push("commit");
+            if self.scenario == "checkpoint_lost" {
+                std::fs::write(
+                    self.effect.with_file_name("result.txt"),
+                    "changed after commit",
+                )
+                .unwrap();
+                return ResponseTemplate::new(503);
+            }
+            s.checkpoint_events.push("ack");
+            ok(self.checkpoint_view(s))
         }
         fn next(&self, s: &State) -> Value {
             if self.scenario == "altered" && s.stage == 1 {
@@ -264,6 +354,36 @@ mod wire {
             }
             ok(json!({"created":true,"tool_call_id":body["tool_call_id"]}))
         }
+    }
+    fn canonical_tree_id(tree: &Value) -> String {
+        // The public manifest contract specifies field order independent of JSON map order.
+        let mut entries = Vec::new();
+        for (path, file) in tree["files"].as_object().unwrap() {
+            let chunks = file["chunks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|chunk| {
+                    format!(
+                        "{{\"sha256\":{},\"size\":{}}}",
+                        chunk["sha256"], chunk["size"]
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            entries.push(format!(
+                "{}:{{\"sha256\":{},\"size\":{},\"mode\":{},\"chunks\":[{}]}}",
+                serde_json::to_string(path).unwrap(),
+                file["sha256"],
+                file["size"],
+                file["mode"],
+                chunks
+            ));
+        }
+        format!(
+            "{:x}",
+            Sha256::digest(format!("{{\"files\":{{{}}}}}", entries.join(",")))
+        )
     }
     fn ok(value: Value) -> ResponseTemplate {
         ResponseTemplate::new(200).set_body_json(value)
@@ -364,6 +484,74 @@ mod wire {
             assert!(!String::from_utf8_lossy(&output.stderr).contains(secret));
             assert!(!journal.contains(secret));
         }
+    }
+    #[tokio::test]
+    async fn workspace_checkpoint_is_acknowledged_before_terminal_completion() {
+        let (_root, _server, oracle, child) = launch("checkpoint").await;
+        let output = result(child).await;
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let state = oracle.state.lock().unwrap();
+        assert!(state.ready_body.as_ref().unwrap()["capabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("filesystem-checkpoint-v1")));
+        assert_eq!(state.receipts.len(), 4);
+        assert_eq!(state.tree_posts, 1);
+        assert_eq!(
+            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
+            &["commit", "ack", "terminal"]
+        );
+        assert_eq!(
+            state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
+            format!("{:x}", Sha256::digest(b"finished"))
+        );
+    }
+    #[tokio::test]
+    async fn workspace_lost_commit_ack_recovers_same_capture_without_reexecution() {
+        let (root, _server, oracle, child) = launch("checkpoint_lost").await;
+        let output = result(child).await;
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
+            "once\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/result.txt")).unwrap(),
+            "changed after commit"
+        );
+        let state = oracle.state.lock().unwrap();
+        assert_eq!(state.tree_posts, 1);
+        assert!(state.checkpoint_reads >= 2);
+        assert_eq!(state.receipts.len(), 4);
+        assert_eq!(
+            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
+            &["commit", "ack", "terminal"]
+        );
+        assert_eq!(
+            state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
+            format!("{:x}", Sha256::digest(b"finished"))
+        );
+    }
+    #[tokio::test]
+    async fn workspace_checkpoint_wrong_generation_cannot_capture_files() {
+        let (_root, _server, oracle, child) = launch("checkpoint_generation").await;
+        let output = result(child).await;
+        assert_eq!(output.status.code(), Some(4));
+        let state = oracle.state.lock().unwrap();
+        assert_eq!(state.receipts.len(), 4);
+        assert_eq!(state.checkpoint_reads, 0);
+        assert!(state.blobs.is_empty());
+        assert!(state.tree.is_none());
     }
     #[tokio::test]
     async fn heartbeat_continues_while_poll_is_slow() {

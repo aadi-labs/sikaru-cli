@@ -8,6 +8,7 @@ pub enum WorkPageExecutionPhase {
     Idle,
     Running,
     WaitingApproval,
+    Checkpointing,
     Terminal,
     /// This variant is used for forward compatibility.
     /// If the server sends a value not recognized by the current SDK version,
@@ -20,6 +21,7 @@ impl Serialize for WorkPageExecutionPhase {
             Self::Idle => serializer.serialize_str("idle"),
             Self::Running => serializer.serialize_str("running"),
             Self::WaitingApproval => serializer.serialize_str("waiting_approval"),
+            Self::Checkpointing => serializer.serialize_str("checkpointing"),
             Self::Terminal => serializer.serialize_str("terminal"),
             Self::__Unknown(val) => serializer.serialize_str(val),
         }
@@ -33,6 +35,7 @@ impl<'de> Deserialize<'de> for WorkPageExecutionPhase {
             "idle" => Ok(Self::Idle),
             "running" => Ok(Self::Running),
             "waiting_approval" => Ok(Self::WaitingApproval),
+            "checkpointing" => Ok(Self::Checkpointing),
             "terminal" => Ok(Self::Terminal),
             _ => Ok(Self::__Unknown(value)),
         }
@@ -45,6 +48,7 @@ impl fmt::Display for WorkPageExecutionPhase {
             Self::Idle => write!(f, "idle"),
             Self::Running => write!(f, "running"),
             Self::WaitingApproval => write!(f, "waiting_approval"),
+            Self::Checkpointing => write!(f, "checkpointing"),
             Self::Terminal => write!(f, "terminal"),
             Self::__Unknown(val) => write!(f, "{}", val),
         }

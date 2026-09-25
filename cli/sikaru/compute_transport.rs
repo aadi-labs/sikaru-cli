@@ -62,6 +62,60 @@ impl Transport {
         )
         .await
     }
+    pub async fn workspace_checkpoint(
+        &self,
+        run_id: &str,
+        deadline: Instant,
+    ) -> Result<WorkspaceCheckpointView> {
+        bounded(
+            deadline,
+            self.client.compute_workspaces.get(
+                &self.binding.project_id,
+                &self.binding.attachment_id,
+                run_id,
+                None,
+            ),
+        )
+        .await
+    }
+    pub async fn workspace_blob(
+        &self,
+        run_id: &str,
+        hash: &str,
+        bytes: Vec<u8>,
+        deadline: Instant,
+    ) -> Result<WorkspaceBlobView> {
+        bounded(
+            deadline,
+            self.client.compute_workspaces.put_blob(
+                &self.binding.project_id,
+                &self.binding.attachment_id,
+                run_id,
+                hash,
+                &bytes,
+                None,
+            ),
+        )
+        .await
+    }
+    pub async fn workspace_tree(
+        &self,
+        run_id: &str,
+        tree: &WorkspaceTreeInput,
+        deadline: Instant,
+    ) -> Result<WorkspaceCheckpointView> {
+        bounded(
+            deadline,
+            self.client.compute_workspaces.commit_tree(
+                &self.binding.project_id,
+                &self.binding.attachment_id,
+                run_id,
+                tree,
+                None,
+            ),
+        )
+        .await
+    }
     pub fn validate(&self, a: &AttachmentView) -> Result<()> {
         let b = &self.binding;
         let same = a.id == b.attachment_id
@@ -86,6 +140,7 @@ impl Transport {
             capabilities: vec![
                 ReadyInputCapabilitiesItem::ComputeExecute,
                 ReadyInputCapabilitiesItem::BashRun,
+                ReadyInputCapabilitiesItem::FilesystemCheckpointV1,
             ],
         }
     }

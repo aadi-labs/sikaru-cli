@@ -303,6 +303,21 @@ that limit terminates the process and reports truncation. Output pages use byte
 offsets, decode UTF-8 lossily, and cap raw pages at 24 KiB so escaped control
 characters remain within the receipt's serialized size limit.
 
+### Workspace checkpoints
+
+The native attachment executor captures the selected task workspace when a run
+completes and waits for its checkpoint to be published before reporting completion.
+Checkpoints retain regular file contents, executable permissions, and the absence
+of deleted files. Keep credentials and private executor state outside the selected
+workspace: all regular files within it are included, including hidden files.
+
+Publication retries reuse the same frozen capture. A lost upload response does not
+rerun commands or capture a different workspace. Keep the private state directory
+until completion so reconnecting can recover that capture. Capture waits for owned
+processes to finish and rejects symlinks, hard links, unsupported file types, and
+workspaces exceeding the capture limits instead of silently dropping files.
+Checkpoints do not restore running processes or overwrite an existing local folder.
+
 ### Command definitions
 
 The CLI ships generated command definitions and its API client. Use `--help`

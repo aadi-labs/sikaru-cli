@@ -181,23 +181,66 @@ async fn work_loop(
             }
         };
         transport.validate(&page.attachment)?;
+        if page.workspace_checkpoint.is_some() {
+            checkpoint_workspace(transport, journal, processes, &page, &lease).await?;
+            idle_wait(Duration::from_secs(1), None).await;
+            continue;
+        }
         if let Some(result) = completion_after_wait(&page, approval_wait, &mut approval_deadline) {
             return Ok(result);
         }
-        let idle = page.operations.is_empty();
-        let delay = Duration::from_secs(page.poll_after_seconds.unwrap_or(1).clamp(1, 5) as u64);
-        for op in page.operations {
-            dispatch(transport, journal, processes, &lease, op).await?;
-        }
-        if idle {
-            let waiting_approval = page
-                .execution
-                .as_ref()
-                .is_some_and(|run| run.approval_required);
-            idle_wait(delay, approval_deadline.filter(|_| waiting_approval)).await;
-        }
+        dispatch_page(
+            transport,
+            journal,
+            processes,
+            &lease,
+            page,
+            approval_deadline,
+        )
+        .await?;
     }
 }
+async fn dispatch_page(
+    transport: &Transport,
+    journal: &mut Journal,
+    processes: &mut Processes,
+    lease: &watch::Receiver<Instant>,
+    page: WorkPage,
+    approval_deadline: Option<Instant>,
+) -> Result<()> {
+    let idle = page.operations.is_empty();
+    let delay = Duration::from_secs(page.poll_after_seconds.unwrap_or(1).clamp(1, 5) as u64);
+    for op in page.operations {
+        dispatch(transport, journal, processes, &lease, op).await?;
+    }
+    if idle {
+        let waiting_approval = page
+            .execution
+            .as_ref()
+            .is_some_and(|run| run.approval_required);
+        idle_wait(delay, approval_deadline.filter(|_| waiting_approval)).await;
+    }
+    Ok(())
+}
+
+async fn checkpoint_workspace(
+    transport: &Transport,
+    journal: &mut Journal,
+    processes: &Processes,
+    page: &WorkPage,
+    lease: &watch::Receiver<Instant>,
+) -> Result<()> {
+    super::workspace_flow::validate(page, journal)?;
+    if !page.live_handles.is_empty() {
+        reconcile(transport, journal, processes, *lease.borrow()).await?;
+        return Ok(());
+    }
+    match super::workspace_flow::publish(transport, journal, page, lease).await {
+        Err(error) if super::transport::transient(&error) => Ok(()),
+        result => result,
+    }
+}
+
 async fn idle_wait(delay: Duration, approval_deadline: Option<Instant>) {
     let wake = Instant::now() + delay;
     tokio::time::sleep_until(approval_deadline.map_or(wake, |deadline| deadline.min(wake))).await;

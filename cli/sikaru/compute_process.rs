@@ -24,6 +24,27 @@ use std::{
 };
 const ARTIFACT_LIMIT: usize = 1024 * 1024;
 const PAGE_LIMIT: usize = 24 * 1024; // JSON escaping of every byte still fits the receipt limit.
+#[derive(Debug)]
+struct UnknownProcessHandle(String);
+impl std::fmt::Display for UnknownProcessHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("unknown process handle")
+    }
+}
+impl std::error::Error for UnknownProcessHandle {}
+
+fn process_observation(result: Result<Value>) -> Result<Value> {
+    match result {
+        Err(error) if error.is::<UnknownProcessHandle>() => {
+            let missing = error.downcast_ref::<UnknownProcessHandle>().unwrap();
+            Ok(json!({"status":"error", "handle_id":missing.0, "error":{
+                "code":"unknown_process_handle",
+                "message":"Use the process id returned by bash.run or bash.start, not a tool-call id."}}))
+        }
+        other => other,
+    }
+}
+
 pub struct Job {
     child: Child,
     group: Arc<Mutex<Option<i32>>>,
@@ -87,7 +108,7 @@ impl Processes {
         journal: &mut Journal,
         operation_key: Option<&str>,
     ) -> Result<Value> {
-        match method {
+        let result = match method {
             "bash.run" => self.run(args, journal, operation_key).await,
             "workspace.write_text" => write_text(args, journal.binding.anchor.path()),
             "bash.start" => self.start(args, journal, operation_key),
@@ -95,7 +116,8 @@ impl Processes {
             "bash.wait" => self.wait(args, journal).await,
             "bash.cancel" => self.cancel(args, journal),
             _ => bail!("unsupported compute operation"),
-        }
+        };
+        process_observation(result)
     }
     async fn run(
         &mut self,
@@ -177,7 +199,7 @@ impl Processes {
         self.terminal
             .get(id)
             .cloned()
-            .context("unknown process handle")
+            .ok_or_else(|| UnknownProcessHandle(id.to_owned()).into())
     }
     fn read(&mut self, args: &HashMap<String, Value>, journal: &mut Journal) -> Result<Value> {
         allowed(args, &["handle_id", "offset", "limit"])?;

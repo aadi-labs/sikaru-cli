@@ -14,6 +14,7 @@ Full command reference for `sikaru`.
 - [`sikaru compute-environments`](#sikaru-compute-environments)
 - [`sikaru compute-operations`](#sikaru-compute-operations)
 - [`sikaru compute-workers`](#sikaru-compute-workers)
+- [`sikaru compute-workspaces`](#sikaru-compute-workspaces)
 - [`sikaru connections`](#sikaru-connections)
 - [`sikaru context-registry`](#sikaru-context-registry)
 - [`sikaru conversations`](#sikaru-conversations)
@@ -565,6 +566,49 @@ Bounded queue snapshot. wait_seconds is a maximum; server may return immediately
 | `--environment-id` | `string` | Yes |  |
 | `--wait-seconds` | `integer` | No |  |
 | `--limit` | `integer` | No |  |
+
+---
+
+### `sikaru compute-workspaces`
+
+#### `sikaru compute-workspaces commit-tree`
+
+Commit Workspace Tree
+
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-checkpoints/{run_id}/tree`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--run-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru compute-workspaces get`
+
+Get Workspace Checkpoint
+
+`GET /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-checkpoints/{run_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--run-id` | `string` | Yes |  |
+
+#### `sikaru compute-workspaces put-blob`
+
+Put Workspace Blob
+
+`PUT /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-checkpoints/{run_id}/blobs/{sha256}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--run-id` | `string` | Yes |  |
+| `--sha256` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---
 

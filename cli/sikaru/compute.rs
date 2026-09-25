@@ -9,6 +9,12 @@ pub mod journal;
 #[path = "compute_process.rs"]
 pub mod process;
 #[cfg(unix)]
+#[path = "compute_workspace.rs"]
+pub mod workspace;
+#[cfg(unix)]
+#[path = "compute_workspace_flow.rs"]
+pub mod workspace_flow;
+#[cfg(unix)]
 #[path = "compute_runtime.rs"]
 pub mod runtime;
 #[cfg(unix)]

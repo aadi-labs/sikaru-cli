@@ -5,8 +5,8 @@
 //!
 //! ## Type Categories
 //!
-//! - **Request/Response Types**: 133 types for API operations
-//! - **Model Types**: 104 types for data representation
+//! - **Request/Response Types**: 134 types for API operations
+//! - **Model Types**: 109 types for data representation
 
 pub mod changesets_list_changesets_changesets_request_status;
 pub mod connections_create_connection_kind;
@@ -152,6 +152,11 @@ pub mod validation_error;
 pub mod versioned_trace_import_action;
 pub mod work_page_execution_phase;
 pub mod work_page;
+pub mod workspace_blob_view;
+pub mod workspace_checkpoint_view_status;
+pub mod workspace_checkpoint_view;
+pub mod workspace_chunk;
+pub mod workspace_file;
 pub mod workspace_provenance_kind;
 pub mod workspace_provenance;
 pub mod create_agent_import_request;
@@ -164,6 +169,7 @@ pub mod executor_credential_input;
 pub mod reconcile_input;
 pub mod teardown_input;
 pub mod attachment_input;
+pub mod workspace_tree_input;
 pub mod environment_input;
 pub mod create_connection;
 pub mod complete_authorization;
@@ -390,6 +396,11 @@ pub use validation_error::ValidationError;
 pub use versioned_trace_import_action::VersionedTraceImportAction;
 pub use work_page_execution_phase::WorkPageExecutionPhase;
 pub use work_page::WorkPage;
+pub use workspace_blob_view::WorkspaceBlobView;
+pub use workspace_checkpoint_view_status::WorkspaceCheckpointViewStatus;
+pub use workspace_checkpoint_view::WorkspaceCheckpointView;
+pub use workspace_chunk::WorkspaceChunk;
+pub use workspace_file::WorkspaceFile;
 pub use workspace_provenance_kind::WorkspaceProvenanceKind;
 pub use workspace_provenance::WorkspaceProvenance;
 pub use create_agent_import_request::CreateAgentImportRequest;
@@ -402,6 +413,7 @@ pub use executor_credential_input::ExecutorCredentialInput;
 pub use reconcile_input::ReconcileInput;
 pub use teardown_input::TeardownInput;
 pub use attachment_input::AttachmentInput;
+pub use workspace_tree_input::WorkspaceTreeInput;
 pub use environment_input::EnvironmentInput;
 pub use create_connection::CreateConnection;
 pub use complete_authorization::CompleteAuthorization;

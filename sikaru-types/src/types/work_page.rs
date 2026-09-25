@@ -16,6 +16,8 @@ pub struct WorkPage {
     pub operations: Vec<OperationView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poll_after_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_checkpoint: Option<WorkspaceCheckpointView>,
 }
 
 impl WorkPage {
@@ -34,6 +36,7 @@ pub struct WorkPageBuilder {
     live_handles: Option<Vec<LiveHandle>>,
     operations: Option<Vec<OperationView>>,
     poll_after_seconds: Option<i64>,
+    workspace_checkpoint: Option<WorkspaceCheckpointView>,
 }
 
 impl WorkPageBuilder {
@@ -72,6 +75,11 @@ impl WorkPageBuilder {
         self
     }
 
+    pub fn workspace_checkpoint(mut self, value: WorkspaceCheckpointView) -> Self {
+        self.workspace_checkpoint = Some(value);
+        self
+    }
+
     /// Consumes the builder and constructs a [`WorkPage`].
     /// This method will fail if any of the following fields are not set:
     /// - [`attachment`](WorkPageBuilder::attachment)
@@ -88,6 +96,7 @@ impl WorkPageBuilder {
             live_handles: self.live_handles.ok_or_else(|| BuildError::missing_field("live_handles"))?,
             operations: self.operations.ok_or_else(|| BuildError::missing_field("operations"))?,
             poll_after_seconds: self.poll_after_seconds,
+            workspace_checkpoint: self.workspace_checkpoint,
         })
     }
 }

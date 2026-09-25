@@ -8,6 +8,7 @@
 //! - **Changesets**
 //! - **ComputeAttachments**
 //! - **ComputeOperations**
+//! - **ComputeWorkspaces**
 //! - **ComputeCredentials**
 //! - **ComputeEnvironments**
 //! - **ComputeWorkers**
@@ -65,6 +66,7 @@ pub mod compute_credentials;
 pub mod compute_environments;
 pub mod compute_operations;
 pub mod compute_workers;
+pub mod compute_workspaces;
 pub mod connections;
 pub mod context_registry;
 pub mod conversations;
@@ -113,6 +115,7 @@ pub struct ApiClient {
     pub changesets: ChangesetsClient,
     pub compute_attachments: ComputeAttachmentsClient,
     pub compute_operations: ComputeOperationsClient,
+    pub compute_workspaces: ComputeWorkspacesClient,
     pub compute_credentials: ComputeCredentialsClient,
     pub compute_environments: ComputeEnvironmentsClient,
     pub compute_workers: ComputeWorkersClient,
@@ -169,6 +172,7 @@ impl ApiClient {
             changesets: ChangesetsClient::new(config.clone())?,
             compute_attachments: ComputeAttachmentsClient::new(config.clone())?,
             compute_operations: ComputeOperationsClient::new(config.clone())?,
+            compute_workspaces: ComputeWorkspacesClient::new(config.clone())?,
             compute_credentials: ComputeCredentialsClient::new(config.clone())?,
             compute_environments: ComputeEnvironmentsClient::new(config.clone())?,
             compute_workers: ComputeWorkersClient::new(config.clone())?,
@@ -227,6 +231,7 @@ pub use compute_credentials::ComputeCredentialsClient;
 pub use compute_environments::ComputeEnvironmentsClient;
 pub use compute_operations::ComputeOperationsClient;
 pub use compute_workers::ComputeWorkersClient;
+pub use compute_workspaces::ComputeWorkspacesClient;
 pub use connections::ConnectionsClient;
 pub use context_registry::ContextRegistryClient;
 pub use conversations::ConversationsClient;

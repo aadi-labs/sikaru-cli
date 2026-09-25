@@ -322,6 +322,10 @@ async fn parked_handle_returns_terminal_state_without_restarting() {
     );
 }
 
+#[path = "../cli/sikaru/compute_workspace.rs"]
+mod workspace;
+#[path = "../cli/sikaru/compute_workspace_flow.rs"]
+mod workspace_flow;
 #[path = "../cli/sikaru/compute_runtime.rs"]
 mod runtime;
 #[path = "../cli/sikaru/compute_transport.rs"]
@@ -829,6 +833,55 @@ async fn bash_run_interrupted_wait_retains_operation_handle_and_refuses_replay()
     p.cleanup(&mut j).unwrap();
     assert_eq!(
         std::fs::read_to_string(b.workspace.join("effect")).unwrap(),
+        "once"
+    );
+}
+
+#[tokio::test]
+async fn wrong_process_handle_can_be_corrected_without_restarting_command() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut processes = process::Processes::new(&j, Duration::from_secs(30));
+    let started = processes
+        .execute(
+            "bash.run",
+            &args(json!({"command":"printf once >> marker; printf answer", "yield_seconds":0})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    for method in ["bash.read", "bash.wait", "bash.cancel"] {
+        let observation = processes
+            .execute(
+                method,
+                &args(json!({"handle_id":"tool-call-not-process"})),
+                &mut j,
+            )
+            .await
+            .unwrap();
+        assert_eq!(observation["error"]["code"], "unknown_process_handle");
+        assert_eq!(observation["status"], "error");
+        assert_eq!(observation["handle_id"], "tool-call-not-process");
+    }
+    processes
+        .execute(
+            "bash.wait",
+            &args(json!({"handle_id":started["id"]})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    let output = processes
+        .execute(
+            "bash.read",
+            &args(json!({"handle_id":started["id"]})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(output["output"], "answer");
+    assert_eq!(
+        std::fs::read_to_string(b.workspace.join("marker")).unwrap(),
         "once"
     );
 }
