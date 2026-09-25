@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.8
+
+- Capture regular files in the selected task workspace and wait for checkpoint publication before reporting completion.
+- Recover interrupted checkpoint uploads from the same retained capture without rerunning task commands.
+- Reject mismatched workspace ownership and unsupported filesystem entries before accepting a checkpoint.
+- Improve shell process recovery and refresh generated workspace checkpoint commands.
+- Workspace checkpoints require an updated managed service. Captures include hidden regular files; keep credentials and executor state outside the selected workspace.
+
 ## 0.2.7
 
 - Update the CLI package version; commands and public API behavior are unchanged.
