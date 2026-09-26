@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.9
+
+- Deliver compute operations over a persistent connection when the service offers it, falling back to polling automatically without re-running recorded operations.
+- Answer shell waits as soon as the process exits instead of on a fixed interval.
+- Add condition waits for process exit, file state, log patterns, TCP ports and HTTP status, and an operation that returns the next background process to finish.
+- Advertise condition-wait support so the service only sends these operations to executors that can serve them.
+- The persistent connection and condition waits require an updated managed service; older services keep using polling.
+
 ## 0.2.8
 
 - Capture regular files in the selected task workspace and wait for checkpoint publication before reporting completion.
