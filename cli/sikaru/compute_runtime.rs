@@ -3,7 +3,10 @@ use super::{
     config::Bootstrap,
     journal::{Binding, Journal},
     process::Processes,
-    transport::{maintain_lease, Transport},
+    transport::{
+        channel_backoff, maintain_lease, Channel, ChannelEnd, ChannelEvent, Delivery, Opened,
+        Transport,
+    },
 };
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
@@ -168,59 +171,208 @@ async fn work_loop(
     lease: watch::Receiver<Instant>,
     approval_wait: Duration,
 ) -> Result<Value> {
-    let mut approval_deadline = None;
+    let mut work = Work {
+        transport,
+        journal,
+        processes,
+        lease,
+        approval_wait,
+        approval_deadline: None,
+    };
+    let mut link = ChannelLink::default();
     loop {
-        ensure_lease(&lease)?;
-        processes.maintenance(journal)?;
-        let deadline = *lease.borrow();
-        let page = match transport.poll(deadline).await {
+        ensure_lease(&work.lease)?;
+        work.processes.maintenance(work.journal)?;
+        let deadline = *work.lease.borrow();
+        let page = match work.transport.poll(deadline).await {
             Ok(page) => page,
             Err(_) => {
-                reconnect(transport, journal, processes, &lease).await?;
+                work.reconnect().await?;
                 continue;
             }
         };
-        transport.validate(&page.attachment)?;
-        if page.workspace_checkpoint.is_some() {
-            checkpoint_workspace(transport, journal, processes, &page, &lease).await?;
-            idle_wait(Duration::from_secs(1), None).await;
-            continue;
+        let channel = link.admits(&page);
+        match work.serve_page(page, None).await? {
+            Served::Done(result) => return Ok(result),
+            _ if channel => {
+                if let Some(result) = work.channel_session(&mut link).await? {
+                    return Ok(result);
+                }
+            }
+            Served::Wait(delay, approval) => idle_wait(delay, approval).await,
+            Served::Busy => {}
         }
-        if let Some(result) = completion_after_wait(&page, approval_wait, &mut approval_deadline) {
-            return Ok(result);
-        }
-        dispatch_page(
-            transport,
-            journal,
-            processes,
-            &lease,
-            page,
-            approval_deadline,
-        )
-        .await?;
     }
 }
-async fn dispatch_page(
-    transport: &Transport,
-    journal: &mut Journal,
-    processes: &mut Processes,
-    lease: &watch::Receiver<Instant>,
-    page: WorkPage,
+/// The executor's live state; both transports serve pages through it.
+struct Work<'a> {
+    transport: &'a Transport,
+    journal: &'a mut Journal,
+    processes: &'a mut Processes,
+    lease: watch::Receiver<Instant>,
+    approval_wait: Duration,
     approval_deadline: Option<Instant>,
-) -> Result<()> {
-    let idle = page.operations.is_empty();
-    let delay = Duration::from_secs(page.poll_after_seconds.unwrap_or(1).clamp(1, 5) as u64);
-    for op in page.operations {
-        dispatch(transport, journal, processes, &lease, op).await?;
+}
+enum Served {
+    Done(Value),
+    Wait(Duration, Option<Instant>),
+    Busy,
+}
+impl Work<'_> {
+    async fn serve_page(
+        &mut self,
+        page: WorkPage,
+        channel: Option<&mut Channel>,
+    ) -> Result<Served> {
+        self.transport.validate(&page.attachment)?;
+        if page.workspace_checkpoint.is_some() {
+            checkpoint_workspace(
+                self.transport,
+                self.journal,
+                self.processes,
+                &page,
+                &self.lease,
+            )
+            .await?;
+            return Ok(Served::Wait(Duration::from_secs(1), None));
+        }
+        if let Some(result) =
+            completion_after_wait(&page, self.approval_wait, &mut self.approval_deadline)
+        {
+            return Ok(Served::Done(result));
+        }
+        self.dispatch_page(page, channel).await
     }
-    if idle {
-        let waiting_approval = page
-            .execution
-            .as_ref()
-            .is_some_and(|run| run.approval_required);
-        idle_wait(delay, approval_deadline.filter(|_| waiting_approval)).await;
+    async fn dispatch_page(
+        &mut self,
+        page: WorkPage,
+        mut channel: Option<&mut Channel>,
+    ) -> Result<Served> {
+        if page.operations.is_empty() {
+            let delay =
+                Duration::from_secs(page.poll_after_seconds.unwrap_or(1).clamp(1, 5) as u64);
+            let waiting_approval = page
+                .execution
+                .as_ref()
+                .is_some_and(|run| run.approval_required);
+            let approval = self.approval_deadline.filter(|_| waiting_approval);
+            return Ok(Served::Wait(delay, approval));
+        }
+        // Every operation in hand runs: it was issued to this executor.
+        for op in page.operations {
+            self.dispatch(op, channel.as_deref_mut()).await?;
+        }
+        Ok(Served::Busy)
     }
-    Ok(())
+    async fn dispatch(&mut self, op: OperationView, channel: Option<&mut Channel>) -> Result<()> {
+        ensure_lease(&self.lease)?;
+        validate_operation(&op, &self.journal.binding)?;
+        let key = format!("{}/{}", op.run_id, op.tool_call_id);
+        let receipt: ReceiptInput = match self.journal.intent(&key, serde_json::to_value(&op)?)? {
+            Some(receipt) => serde_json::from_value(receipt)?,
+            None => execute_operation(&op, &key, self.journal, self.processes, &self.lease).await?,
+        };
+        if let Some(channel) = channel {
+            let deadline = *self.lease.borrow();
+            if channel.deliver(&receipt, deadline).await == Delivery::Accepted {
+                return self.journal.ack(&key);
+            }
+        }
+        deliver_receipt(self.transport, self.journal, &self.lease, &key, &receipt).await
+    }
+    async fn reconnect(&mut self) -> Result<()> {
+        reconnect(self.transport, self.journal, self.processes, &self.lease).await
+    }
+    /// Serve running-turn pages pushed over the channel; any other page returns to polling.
+    async fn channel_session(&mut self, link: &mut ChannelLink) -> Result<Option<Value>> {
+        let end = match self.transport.open_channel().await {
+            Opened::Channel(mut channel) => {
+                let end = self.serve_channel(&mut channel, link).await;
+                channel.close().await;
+                end?
+            }
+            Opened::Ended(ChannelEnd::Lost) => return link.retry_later().await.map(|_| None),
+            Opened::Ended(ChannelEnd::Poll) => {
+                // The handshake selects polling although the page did not: poll at the idle pace.
+                idle_wait(Duration::from_secs(1), None).await;
+                return Ok(None);
+            }
+            Opened::Ended(end) => end,
+        };
+        if end == ChannelEnd::Lost {
+            // As after any lost connection: reconcile and replay receipts before reconnecting.
+            self.reconnect().await?;
+        }
+        if end != ChannelEnd::Poll {
+            link.retry_later().await?;
+        }
+        Ok(None)
+    }
+    async fn serve_channel(
+        &mut self,
+        channel: &mut Channel,
+        link: &mut ChannelLink,
+    ) -> Result<ChannelEnd> {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            ensure_lease(&self.lease)?;
+            self.processes.maintenance(self.journal)?;
+            let event = tokio::select! {
+                event = channel.next() => event,
+                _ = tick.tick() => continue,
+            };
+            let page = match event {
+                ChannelEvent::Page(page) => page,
+                ChannelEvent::Ended(end) => return Ok(end),
+                _ => continue,
+            };
+            if !channel_page(&page) {
+                return Ok(ChannelEnd::Poll);
+            }
+            self.transport.validate(&page.attachment)?;
+            link.progressed();
+            self.dispatch_page(*page, Some(channel)).await?;
+            if let Some(end) = channel.ended() {
+                return Ok(end);
+            }
+        }
+    }
+}
+/// A running turn with nothing but operations: checkpoints, approvals and
+/// terminal or stopping states are served by the HTTP route.
+fn channel_page(page: &WorkPage) -> bool {
+    page.transport == Some(WorkPageTransport::Channel)
+        && page.workspace_checkpoint.is_none()
+        && completion(page).is_none()
+}
+const CHANNEL_ATTEMPTS: u32 = 3;
+/// Channel attempts for this run. After `CHANNEL_ATTEMPTS` consecutive failures
+/// the run stays on polling, which needs no change to its binding.
+#[derive(Default)]
+struct ChannelLink {
+    failures: u32,
+    exhausted: bool,
+}
+impl ChannelLink {
+    fn admits(&self, page: &WorkPage) -> bool {
+        !self.exhausted && channel_page(page)
+    }
+    fn progressed(&mut self) {
+        self.failures = 0;
+    }
+    async fn retry_later(&mut self) -> Result<()> {
+        self.failures += 1;
+        if self.failures >= CHANNEL_ATTEMPTS {
+            self.exhausted = true;
+            eprintln!(
+                "{}",
+                json!({"event":"executor_transport","transport":"poll","reason":"channel_unavailable"})
+            );
+            return Ok(());
+        }
+        tokio::time::sleep(channel_backoff(self.failures)).await;
+        Ok(())
+    }
 }
 
 async fn checkpoint_workspace(
@@ -281,22 +433,6 @@ async fn reconnect(
     transport.ready(&journal.instance, deadline).await?;
     Ok(())
 }
-async fn dispatch(
-    transport: &Transport,
-    journal: &mut Journal,
-    processes: &mut Processes,
-    lease: &watch::Receiver<Instant>,
-    op: OperationView,
-) -> Result<()> {
-    ensure_lease(lease)?;
-    validate_operation(&op, &journal.binding)?;
-    let key = format!("{}/{}", op.run_id, op.tool_call_id);
-    let receipt: ReceiptInput = match journal.intent(&key, serde_json::to_value(&op)?)? {
-        Some(receipt) => serde_json::from_value(receipt)?,
-        None => execute_operation(&op, &key, journal, processes, lease).await?,
-    };
-    deliver_receipt(transport, journal, lease, &key, &receipt).await
-}
 async fn execute_operation(
     op: &OperationView,
     key: &str,
@@ -329,8 +465,8 @@ async fn deliver_receipt(
     for _ in 0..3 {
         ensure_lease(lease)?;
         let deadline = *lease.borrow();
-        if transport.submit(&receipt, deadline).await.is_ok() {
-            journal.ack(&key)?;
+        if transport.submit(receipt, deadline).await.is_ok() {
+            journal.ack(key)?;
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(100)).await;

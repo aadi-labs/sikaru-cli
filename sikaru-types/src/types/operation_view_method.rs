@@ -11,6 +11,8 @@ pub enum OperationViewMethod {
     BashWait,
     BashCancel,
     WorkspaceWriteText,
+    BashWaitFor,
+    JobsNextCompleted,
     /// This variant is used for forward compatibility.
     /// If the server sends a value not recognized by the current SDK version,
     /// it will be captured here with the raw string value.
@@ -25,6 +27,8 @@ impl Serialize for OperationViewMethod {
             Self::BashWait => serializer.serialize_str("bash.wait"),
             Self::BashCancel => serializer.serialize_str("bash.cancel"),
             Self::WorkspaceWriteText => serializer.serialize_str("workspace.write_text"),
+            Self::BashWaitFor => serializer.serialize_str("bash.wait_for"),
+            Self::JobsNextCompleted => serializer.serialize_str("jobs.next_completed"),
             Self::__Unknown(val) => serializer.serialize_str(val),
         }
     }
@@ -40,6 +44,8 @@ impl<'de> Deserialize<'de> for OperationViewMethod {
             "bash.wait" => Ok(Self::BashWait),
             "bash.cancel" => Ok(Self::BashCancel),
             "workspace.write_text" => Ok(Self::WorkspaceWriteText),
+            "bash.wait_for" => Ok(Self::BashWaitFor),
+            "jobs.next_completed" => Ok(Self::JobsNextCompleted),
             _ => Ok(Self::__Unknown(value)),
         }
     }
@@ -54,6 +60,8 @@ impl fmt::Display for OperationViewMethod {
             Self::BashWait => write!(f, "bash.wait"),
             Self::BashCancel => write!(f, "bash.cancel"),
             Self::WorkspaceWriteText => write!(f, "workspace.write_text"),
+            Self::BashWaitFor => write!(f, "bash.wait_for"),
+            Self::JobsNextCompleted => write!(f, "jobs.next_completed"),
             Self::__Unknown(val) => write!(f, "{}", val),
         }
     }

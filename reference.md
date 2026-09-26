@@ -2041,31 +2041,6 @@ Submit Tool Result
 
 ### `sikaru sessions`
 
-#### `sikaru sessions create-managed-interpreter`
-
-Create Managed Interpreter
-
-`POST /v1/projects/{project_id}/sessions/{session_id}/interpreters`
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--project-id` | `string` | Yes |  |
-| `--session-id` | `string` | Yes |  |
-| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
-
-#### `sikaru sessions execute-managed-interpreter`
-
-Execute Managed Interpreter
-
-`POST /v1/projects/{project_id}/sessions/{session_id}/interpreters/{interpreter_id}/execute`
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--project-id` | `string` | Yes |  |
-| `--session-id` | `string` | Yes |  |
-| `--interpreter-id` | `string` | Yes |  |
-| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
-
 #### `sikaru sessions get-managed-session`
 
 Get Managed Session
@@ -2111,18 +2086,6 @@ List Managed Session Plan
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--session-id` | `string` | Yes |  |
-
-#### `sikaru sessions start-managed-sandbox-execution`
-
-Start Managed Sandbox Execution
-
-`POST /v1/projects/{project_id}/sessions/{session_id}/sandbox-executions`
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--project-id` | `string` | Yes |  |
-| `--session-id` | `string` | Yes |  |
-| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---
 

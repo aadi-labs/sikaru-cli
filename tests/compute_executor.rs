@@ -61,6 +61,21 @@ mod wire {
         tree_id: Option<String>,
         blobs: BTreeMap<String, Vec<u8>>,
         checkpoint_events: Vec<&'static str>,
+        http_receipts: usize,
+        channel: ChannelState,
+    }
+    /// What the fake gateway saw on its executor channel endpoint.
+    #[derive(Default)]
+    struct ChannelState {
+        connections: usize,
+        refusals: usize,
+        unauthorized: usize,
+        heartbeats: usize,
+        operations_sent: Vec<String>,
+        receipts: Vec<Value>,
+        arrivals: Vec<std::time::SystemTime>,
+        resend: Option<Value>,
+        switched: bool,
     }
     #[derive(Clone)]
     struct Oracle {
@@ -200,7 +215,7 @@ mod wire {
         }
         fn work(&self, s: &mut State) -> ResponseTemplate {
             s.polls += 1;
-            let mut page = json!({"attachment":attachment("ready",3),"execution_phase":"running","execution":{"run_id":"run","status":"running","terminal":false,"approval_required":false},"operations":[],"issued_operations":[],"live_handles":[]});
+            let mut page = self.advertised_page(s);
             if !s.ready {
                 if s.lost_issued {
                     page["issued_operations"] = json!([{ "run_id":"r".repeat(128),"tool_call_id":format!("{0:0128}",0),"request_digest":"opaque-0","owner_epoch":1,"workspace_generation":"generation","method":"bash.start"}]);
@@ -214,10 +229,10 @@ mod wire {
             if self.scenario == "hang" {
                 return ok(page).set_delay(Duration::from_secs(2));
             }
-            if s.stage >= 4 {
+            if s.stage >= self.final_stage() {
                 return self.completed_work(s, page);
             }
-            if self.scenario == "altered" && s.stage == 1 && !self.effect.exists() {
+            if self.withholds_operation(s) {
                 return ok(page);
             }
             let op = self.next(s);
@@ -341,6 +356,7 @@ mod wire {
             )
         }
         fn receipt(&self, s: &mut State, body: Value) -> ResponseTemplate {
+            s.http_receipts += 1;
             assert!(serde_json::to_vec(&body).unwrap().len() <= 256 * 1024);
             assert!(body["idempotency_key"].as_str().unwrap().len() <= 128);
             if let Some(previous) = s.duplicate.take() {
@@ -359,6 +375,9 @@ mod wire {
             }
             ok(json!({"created":true,"tool_call_id":body["tool_call_id"]}))
         }
+    }
+    fn running_page() -> Value {
+        json!({"attachment":attachment("ready",3),"execution_phase":"running","execution":{"run_id":"run","status":"running","terminal":false,"approval_required":false},"operations":[],"issued_operations":[],"live_handles":[]})
     }
     fn canonical_tree_id(tree: &Value) -> String {
         // The public manifest contract specifies field order independent of JSON map order.
@@ -409,8 +428,14 @@ mod wire {
             .respond_with(oracle.clone())
             .mount(&server)
             .await;
+        let base_url = if oracle.channel_scenario() {
+            channel::front(*server.address(), oracle.clone()).await
+        } else {
+            server.uri()
+        };
+        let command_timeout = if scenario == "channel_long" { 60 } else { 10 };
         let bootstrap = json!({"project_id":"project","session_id":"session","attachment_id":"attachment","owner_epoch":1,"workspace_generation":"generation","journal_id":"journal","credential_id":"credential",
-            "token":"restricted-executor-secret","workspace_provenance":{"kind":"existing_directory","identity":"original"},"workspace":path.join("workspace"),"state_dir":path.join("state"),"command_timeout_seconds":10});
+            "token":"restricted-executor-secret","workspace_provenance":{"kind":"existing_directory","identity":"original"},"workspace":path.join("workspace"),"state_dir":path.join("state"),"command_timeout_seconds":command_timeout});
         let mut child = tokio::process::Command::new(
             std::env::var("SIKARU_TEST_INSTALLED")
                 .unwrap_or_else(|_| env!("CARGO_BIN_EXE_sikaru").to_owned()),
@@ -421,7 +446,7 @@ mod wire {
             "--bootstrap",
             "-",
             "--base-url",
-            &server.uri(),
+            &base_url,
         ])
         .env("SIKARU_API_KEY", "controller-secret")
         .stdin(Stdio::piped())
@@ -755,5 +780,400 @@ mod wire {
         assert_eq!(output.status.code(), Some(4));
         let v: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(v["cleanup"], "unconfirmed");
+    }
+
+    /// Executor channel endpoint of the fake gateway. One front port routes each
+    /// connection: a WebSocket upgrade for the channel path is served here, and
+    /// everything else is piped unchanged to the HTTP oracle.
+    mod channel {
+        use super::*;
+        use futures_util::{SinkExt, StreamExt};
+        use tokio::net::TcpStream;
+        use tokio_tungstenite::tungstenite::{
+            handshake::server::{ErrorResponse, Request as Upgrade, Response as Accept},
+            http,
+            protocol::{frame::coding::CloseCode, CloseFrame},
+            Message,
+        };
+        type Socket = tokio_tungstenite::WebSocketStream<TcpStream>;
+        type Sink = futures_util::stream::SplitSink<Socket, Message>;
+
+        pub(super) async fn front(http_oracle: std::net::SocketAddr, oracle: Oracle) -> String {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            tokio::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    tokio::spawn(route(stream, http_oracle, oracle.clone()));
+                }
+            });
+            format!("http://{address}")
+        }
+        async fn route(mut stream: TcpStream, http_oracle: std::net::SocketAddr, oracle: Oracle) {
+            let Some(head) = request_head(&stream).await else {
+                return;
+            };
+            if head.starts_with("get ")
+                && head.contains("/channel")
+                && head.contains("upgrade: websocket")
+            {
+                return upgrade(stream, oracle).await;
+            }
+            let mut upstream = TcpStream::connect(http_oracle).await.unwrap();
+            let _ = tokio::io::copy_bidirectional(&mut stream, &mut upstream).await;
+        }
+        async fn request_head(stream: &TcpStream) -> Option<String> {
+            let mut head = [0u8; 4096];
+            loop {
+                let n = stream.peek(&mut head).await.ok().filter(|n| *n > 0)?;
+                if head[..n].windows(4).any(|w| w == b"\r\n\r\n") || n == head.len() {
+                    return Some(String::from_utf8_lossy(&head[..n]).to_ascii_lowercase());
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }
+        #[allow(clippy::result_large_err)] // the upgrade callback signature is fixed
+        async fn upgrade(stream: TcpStream, oracle: Oracle) {
+            let state = oracle.state.clone();
+            let refuse = oracle.scenario == "channel_refused";
+            let check = move |request: &Upgrade, accept: Accept| -> Result<Accept, ErrorResponse> {
+                let mut s = state.lock().unwrap();
+                let bearer = request
+                    .headers()
+                    .get("authorization")
+                    .map(|v| v.as_bytes().to_vec());
+                if bearer.as_deref() != Some(b"Bearer restricted-executor-secret".as_slice())
+                    || request.uri().query().is_some()
+                {
+                    s.channel.unauthorized += 1;
+                }
+                if refuse {
+                    s.channel.refusals += 1;
+                    return Err(http::Response::builder().status(503).body(None).unwrap());
+                }
+                Ok(accept)
+            };
+            if let Ok(socket) = tokio_tungstenite::accept_hdr_async(stream, check).await {
+                oracle.serve_channel(socket).await;
+            }
+        }
+        async fn send(sink: &mut Sink, value: Value) {
+            let _ = sink.send(Message::Text(value.to_string())).await;
+        }
+        fn operations(page: Value) -> Value {
+            json!({"type":"operations","page":page})
+        }
+        enum Reply {
+            /// Drop the connection without accepting the receipt.
+            Drop,
+            Accept {
+                frame: Value,
+                next: Option<Value>,
+                close: bool,
+            },
+        }
+        impl Oracle {
+            async fn serve_channel(&self, socket: Socket) {
+                let (mut sink, mut stream) = socket.split();
+                send(&mut sink, json!({"type":"handshake","protocol":"sikaru-compute-channel-v1","attachment_id":"attachment",
+                    "owner_epoch":1,"workspace_generation":"generation","transport":"channel","heartbeat_interval_seconds":0.3,
+                    "heartbeat_timeout_seconds":5,"max_frame_bytes":262144,"inbound_frame_limit":2000,"inbound_frame_window_seconds":300})).await;
+                let first = {
+                    let mut s = self.state.lock().unwrap();
+                    s.channel.connections += 1;
+                    match s.channel.resend.take() {
+                        Some(op) => self.page_with(&mut s, op),
+                        None => self.channel_page(&mut s),
+                    }
+                };
+                send(&mut sink, operations(first)).await;
+                while let Some(Ok(message)) = stream.next().await {
+                    let Message::Text(text) = message else {
+                        continue;
+                    };
+                    let frame: Value = serde_json::from_str(&text).unwrap();
+                    if frame == json!({"type":"heartbeat"}) {
+                        self.state.lock().unwrap().channel.heartbeats += 1;
+                        continue;
+                    }
+                    assert_eq!(frame["type"], "receipt", "{frame}");
+                    let reply = self.channel_receipt(frame["receipt"].clone());
+                    let Reply::Accept { frame, next, close } = reply else {
+                        return;
+                    };
+                    if self.scenario == "channel_slow" {
+                        // Outlasts the lease renewal interval while the receipt awaits acceptance.
+                        tokio::time::sleep(Duration::from_millis(1500)).await;
+                    }
+                    send(&mut sink, frame).await;
+                    if let Some(page) = next {
+                        send(&mut sink, operations(page)).await;
+                    }
+                    if close {
+                        send(&mut sink, json!({"type":"close","reason":"transport_poll","detail":"The current turn selects polling"})).await;
+                        let _ = sink
+                            .send(Message::Close(Some(CloseFrame {
+                                code: CloseCode::Normal,
+                                reason: "transport_poll".into(),
+                            })))
+                            .await;
+                        return;
+                    }
+                }
+            }
+            fn channel_receipt(&self, body: Value) -> Reply {
+                let mut s = self.state.lock().unwrap();
+                s.channel.receipts.push(body.clone());
+                s.channel.arrivals.push(std::time::SystemTime::now());
+                if self.scenario == "channel_drop" && s.channel.connections == 1 {
+                    // Delivered and executed, but the receipt never returns on this connection.
+                    s.channel.resend = Some(operation(
+                        0,
+                        "bash.start",
+                        json!({"command":"echo once >> effect"}),
+                    ));
+                    return Reply::Drop;
+                }
+                let created = !s
+                    .receipts
+                    .iter()
+                    .any(|r| r["tool_call_id"] == body["tool_call_id"]);
+                if created {
+                    if s.stage == 0 {
+                        s.handle = body["payload"]["id"].as_str().unwrap_or_default().into();
+                    }
+                    s.receipts.push(body.clone());
+                    s.stage += 1;
+                }
+                let close = self.scenario == "channel_switch" && s.stage == 2;
+                s.channel.switched |= close;
+                let frame = json!({"type":"receipt_accepted","run_id":body["run_id"],
+                    "receipt":{"tool_call_id":body["tool_call_id"],"created":created,"status":"accepted"}});
+                let next = (!close).then(|| self.channel_page(&mut s));
+                Reply::Accept { frame, next, close }
+            }
+            fn channel_page(&self, s: &mut State) -> Value {
+                let mut page = running_page();
+                page["transport"] = json!("channel");
+                if s.stage >= self.final_stage() {
+                    page["execution"]["terminal"] = json!(true);
+                    page["execution"]["status"] = json!("completed");
+                    return page;
+                }
+                if self.scenario == "channel_signal" && s.stage >= 1 {
+                    return page;
+                }
+                let op = self.channel_operation(s);
+                self.page_with(s, op)
+            }
+            fn page_with(&self, s: &mut State, op: Value) -> Value {
+                s.channel
+                    .operations_sent
+                    .push(op["tool_call_id"].as_str().unwrap().into());
+                let mut page = running_page();
+                page["transport"] = json!("channel");
+                page["operations"] = json!([op]);
+                page
+            }
+            fn channel_operation(&self, s: &State) -> Value {
+                match (self.scenario, s.stage) {
+                    ("channel_long", _) => operation(
+                        0,
+                        "bash.run",
+                        json!({"command":"sleep 20; touch finished","yield_seconds":30,"limit":8192}),
+                    ),
+                    ("channel_signal", _) => operation(
+                        0,
+                        "bash.start",
+                        json!({"command":"touch started; sleep 2; touch escaped"}),
+                    ),
+                    ("channel_drop", 0) => {
+                        operation(0, "bash.start", json!({"command":"echo once >> effect"}))
+                    }
+                    _ => self.next(s),
+                }
+            }
+        }
+    }
+    impl Oracle {
+        /// The HTTP work page, advertising the channel in channel scenarios.
+        fn advertised_page(&self, s: &State) -> Value {
+            let mut page = running_page();
+            if self.channel_scenario() {
+                let transport = if s.channel.switched {
+                    "poll"
+                } else {
+                    "channel"
+                };
+                page["transport"] = json!(transport);
+            }
+            page
+        }
+        fn withholds_operation(&self, s: &State) -> bool {
+            let altered = self.scenario == "altered" && s.stage == 1 && !self.effect.exists();
+            altered || self.channel_serves_operations(s)
+        }
+        fn channel_scenario(&self) -> bool {
+            self.scenario.starts_with("channel")
+        }
+        /// Channel scenarios push operations on the channel until they switch to polling.
+        fn channel_serves_operations(&self, s: &State) -> bool {
+            self.channel_scenario() && self.scenario != "channel_refused" && !s.channel.switched
+        }
+        fn final_stage(&self) -> usize {
+            if self.scenario == "channel_long" {
+                1
+            } else {
+                4
+            }
+        }
+    }
+    fn completed(output: &std::process::Output) -> Value {
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
+        assert_eq!(
+            value["status"],
+            "completed",
+            "{value} {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(value["cleanup"], "confirmed", "{value}");
+        value
+    }
+    #[tokio::test]
+    async fn channel_operations_execute_once_with_receipts_on_the_channel() {
+        let (root, _server, oracle, child) = launch("channel").await;
+        completed(&result(child).await);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
+            "once\n"
+        );
+        let s = oracle.state.lock().unwrap();
+        assert_eq!(s.channel.connections, 1);
+        assert_eq!(s.channel.unauthorized, 0);
+        assert_eq!(s.channel.receipts.len(), 4);
+        assert_eq!(s.receipts.len(), 4);
+        assert_eq!(s.http_receipts, 0, "receipts return on the channel");
+        let mut sent = s.channel.operations_sent.clone();
+        sent.dedup();
+        assert_eq!(sent.len(), 4, "each operation is pushed once and runs once");
+    }
+    #[tokio::test]
+    async fn dropped_channel_redelivers_the_operation_without_reexecuting_it() {
+        let (root, _server, oracle, child) = launch("channel_drop").await;
+        completed(&result(child).await);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
+            "once\n"
+        );
+        let s = oracle.state.lock().unwrap();
+        assert_eq!(s.channel.connections, 2);
+        assert_eq!(
+            s.channel.operations_sent[0], s.channel.operations_sent[1],
+            "same operation identity re-sent"
+        );
+        assert_eq!(
+            s.channel.receipts[0], s.channel.receipts[1],
+            "the recorded receipt, not a second execution"
+        );
+        assert_eq!(s.receipts.len(), 4);
+        assert!(
+            s.reconciliations.len() >= 2,
+            "the lost channel is reconciled before reconnecting"
+        );
+    }
+    #[tokio::test]
+    async fn refused_channel_falls_back_to_polling_after_three_attempts() {
+        let (root, _server, oracle, child) = launch("channel_refused").await;
+        completed(&result(child).await);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
+            "once\n"
+        );
+        let s = oracle.state.lock().unwrap();
+        assert_eq!(s.channel.refusals, 3);
+        assert_eq!(s.receipts.len(), 4);
+        assert!(s.http_receipts >= 4);
+    }
+    #[tokio::test]
+    async fn advertised_switch_to_polling_is_followed_mid_run() {
+        let (root, _server, oracle, child) = launch("channel_switch").await;
+        completed(&result(child).await);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
+            "once\n"
+        );
+        let s = oracle.state.lock().unwrap();
+        assert_eq!(
+            s.channel.connections, 1,
+            "a transport switch is not a failure to reconnect"
+        );
+        assert_eq!(s.channel.receipts.len(), 2);
+        assert_eq!(s.receipts.len(), 4);
+        assert_eq!(s.http_receipts, 2);
+    }
+    #[tokio::test]
+    async fn lease_renewal_during_a_channel_send_does_not_block_the_executor() {
+        let (_root, _server, oracle, child) = launch("channel_slow").await;
+        completed(&result(child).await);
+        let s = oracle.state.lock().unwrap();
+        assert_eq!(s.channel.receipts.len(), 4);
+        assert!(
+            s.heartbeat >= 4,
+            "lease renewed {} times across 6 s of sends",
+            s.heartbeat
+        );
+        assert!(
+            s.channel.heartbeats >= 2,
+            "channel heartbeats continue while a receipt waits"
+        );
+    }
+    #[tokio::test]
+    async fn sigterm_during_a_channel_wait_cancels_with_cleanup_confirmed() {
+        let (root, _server, oracle, child) = launch("channel_signal").await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        while oracle.state.lock().unwrap().channel.receipts.is_empty() {
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        unsafe {
+            libc::kill(child.id().unwrap() as i32, libc::SIGTERM);
+        }
+        let output = result(child).await;
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["status"], "cancelled", "{value}");
+        assert_eq!(value["cleanup"], "confirmed", "{value}");
+        assert_eq!(value["cancel_acknowledged"], true);
+        assert!(root.path().join("workspace/started").exists());
+        tokio::time::sleep(Duration::from_millis(2200)).await;
+        assert!(!root.path().join("workspace/escaped").exists());
+    }
+    #[tokio::test]
+    async fn long_command_is_answered_once_and_its_receipt_follows_exit_promptly() {
+        let (root, _server, oracle, child) = launch("channel_long").await;
+        let output = tokio::time::timeout(Duration::from_secs(60), child.wait_with_output())
+            .await
+            .unwrap()
+            .unwrap();
+        completed(&output);
+        let s = oracle.state.lock().unwrap();
+        assert_eq!(
+            s.channel.operations_sent.len(),
+            1,
+            "one call, not a chain of polling calls"
+        );
+        assert_eq!(s.channel.receipts.len(), 1);
+        let payload = &s.channel.receipts[0]["payload"];
+        assert_eq!(payload["status"], "exited");
+        assert_eq!(payload["returncode"], 0);
+        let exited = std::fs::metadata(root.path().join("workspace/finished"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let latency = s.channel.arrivals[0].duration_since(exited).unwrap();
+        eprintln!(
+            "receipt arrived {} ms after process exit",
+            latency.as_millis()
+        );
+        assert!(latency < Duration::from_millis(300), "{latency:?}");
     }
 }

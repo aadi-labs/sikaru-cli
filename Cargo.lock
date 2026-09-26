@@ -516,6 +516,7 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "rand 0.8.6",
+ "regex",
  "reqwest-sse",
  "reqwest",
  "secrecy",

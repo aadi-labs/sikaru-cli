@@ -8,6 +8,7 @@ pub enum ReadyInputCapabilitiesItem {
     ComputeExecute,
     BashRun,
     FilesystemCheckpointV1,
+    ConditionWaitsV1,
     /// This variant is used for forward compatibility.
     /// If the server sends a value not recognized by the current SDK version,
     /// it will be captured here with the raw string value.
@@ -19,6 +20,7 @@ impl Serialize for ReadyInputCapabilitiesItem {
             Self::ComputeExecute => serializer.serialize_str("compute.execute"),
             Self::BashRun => serializer.serialize_str("bash.run"),
             Self::FilesystemCheckpointV1 => serializer.serialize_str("filesystem-checkpoint-v1"),
+            Self::ConditionWaitsV1 => serializer.serialize_str("condition-waits-v1"),
             Self::__Unknown(val) => serializer.serialize_str(val),
         }
     }
@@ -31,6 +33,7 @@ impl<'de> Deserialize<'de> for ReadyInputCapabilitiesItem {
             "compute.execute" => Ok(Self::ComputeExecute),
             "bash.run" => Ok(Self::BashRun),
             "filesystem-checkpoint-v1" => Ok(Self::FilesystemCheckpointV1),
+            "condition-waits-v1" => Ok(Self::ConditionWaitsV1),
             _ => Ok(Self::__Unknown(value)),
         }
     }
@@ -42,6 +45,7 @@ impl fmt::Display for ReadyInputCapabilitiesItem {
             Self::ComputeExecute => write!(f, "compute.execute"),
             Self::BashRun => write!(f, "bash.run"),
             Self::FilesystemCheckpointV1 => write!(f, "filesystem-checkpoint-v1"),
+            Self::ConditionWaitsV1 => write!(f, "condition-waits-v1"),
             Self::__Unknown(val) => write!(f, "{}", val),
         }
     }

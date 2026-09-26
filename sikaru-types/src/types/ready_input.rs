@@ -4,6 +4,7 @@ use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ReadyInput {
+    /// Optional features beyond compute.execute. 'condition-waits-v1' serves bash.wait_for (WaitForArguments -> WaitForResult) and jobs.next_completed (NextCompletedArguments -> NextCompletedResult); only executors declaring it receive those operations.
     #[serde(default)]
     pub capabilities: Vec<ReadyInputCapabilitiesItem>,
     #[serde(default)]

@@ -16,6 +16,9 @@ pub struct WorkPage {
     pub operations: Vec<OperationView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poll_after_seconds: Option<i64>,
+    /// Transport the current blocking turn's harness selects for this attachment. Use the executor channel only while this is 'channel'; otherwise poll this route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport: Option<WorkPageTransport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_checkpoint: Option<WorkspaceCheckpointView>,
 }
@@ -36,6 +39,7 @@ pub struct WorkPageBuilder {
     live_handles: Option<Vec<LiveHandle>>,
     operations: Option<Vec<OperationView>>,
     poll_after_seconds: Option<i64>,
+    transport: Option<WorkPageTransport>,
     workspace_checkpoint: Option<WorkspaceCheckpointView>,
 }
 
@@ -75,6 +79,11 @@ impl WorkPageBuilder {
         self
     }
 
+    pub fn transport(mut self, value: WorkPageTransport) -> Self {
+        self.transport = Some(value);
+        self
+    }
+
     pub fn workspace_checkpoint(mut self, value: WorkspaceCheckpointView) -> Self {
         self.workspace_checkpoint = Some(value);
         self
@@ -96,6 +105,7 @@ impl WorkPageBuilder {
             live_handles: self.live_handles.ok_or_else(|| BuildError::missing_field("live_handles"))?,
             operations: self.operations.ok_or_else(|| BuildError::missing_field("operations"))?,
             poll_after_seconds: self.poll_after_seconds,
+            transport: self.transport,
             workspace_checkpoint: self.workspace_checkpoint,
         })
     }

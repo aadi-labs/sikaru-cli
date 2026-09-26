@@ -885,3 +885,352 @@ async fn wrong_process_handle_can_be_corrected_without_restarting_command() {
         "once"
     );
 }
+
+// ---- Event-driven waits: one call returns on the event, bounded by its deadline ----
+
+async fn start(p: &mut process::Processes, j: &mut Journal, command: &str) -> String {
+    let started = p
+        .execute("bash.start", &args(json!({ "command": command })), j)
+        .await
+        .unwrap();
+    started["id"].as_str().unwrap().to_owned()
+}
+fn elapsed_near(started: std::time::Instant, event: f64, slack: f64) {
+    let seconds = started.elapsed().as_secs_f64();
+    assert!(
+        seconds >= event - 0.05 && seconds <= event + slack,
+        "returned after {seconds:.3}s, expected about {event}s"
+    );
+}
+#[tokio::test]
+async fn bash_wait_returns_once_on_exit_not_at_the_deadline() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(30));
+    let id = start(&mut p, &mut j, "sleep 1.2; printf done").await;
+    let started = std::time::Instant::now();
+    let end = p
+        .execute(
+            "bash.wait",
+            &args(json!({"handle_id": id, "timeout": 20})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    elapsed_near(started, 1.2, 0.3);
+    assert_eq!(end["status"], "exited");
+    assert_eq!(end["returncode"], 0);
+    p.cleanup(&mut j).unwrap();
+}
+#[tokio::test]
+async fn failing_command_returns_at_once_with_its_status() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(30));
+    let started = std::time::Instant::now();
+    let result = p
+        .execute(
+            "bash.run",
+            &args(json!({"command": "echo broken >&2; exit 3", "yield_seconds": 20})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert_eq!(result["status"], "exited");
+    assert_eq!(result["returncode"], 3);
+    assert_eq!(result["output"], "broken\n");
+    p.cleanup(&mut j).unwrap();
+}
+async fn wait_for(
+    p: &mut process::Processes,
+    j: &mut Journal,
+    conditions: Value,
+    timeout: f64,
+) -> Value {
+    p.execute(
+        "bash.wait_for",
+        &args(json!({"conditions": conditions, "timeout": timeout})),
+        j,
+    )
+    .await
+    .unwrap()
+}
+#[tokio::test]
+async fn wait_for_fires_once_near_each_kind_of_event() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(30));
+    // Process exit.
+    let id = start(&mut p, &mut j, "sleep 0.8; exit 7").await;
+    let started = std::time::Instant::now();
+    let r = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"exit","handle_id":id}]),
+        10.0,
+    )
+    .await;
+    elapsed_near(started, 0.8, 0.3);
+    assert_eq!(r["status"], "fired");
+    assert_eq!(
+        r["conditions"][0]["observed"],
+        json!({"status":"exited","returncode":7})
+    );
+    assert_eq!(r["conditions"][0]["reason"], Value::Null);
+    // A path appearing, relative to the workspace.
+    start(&mut p, &mut j, "sleep 0.8; touch ready").await;
+    let started = std::time::Instant::now();
+    let r = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"path","path":"ready","state":"exists"}]),
+        10.0,
+    )
+    .await;
+    elapsed_near(started, 0.8, 0.35);
+    assert_eq!(r["conditions"][0]["fired"], true);
+    // A log line, while the process keeps running.
+    let id = start(
+        &mut p,
+        &mut j,
+        "sleep 0.8; echo 'server listening'; sleep 20",
+    )
+    .await;
+    let started = std::time::Instant::now();
+    let r = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"log","handle_id":id,"pattern":"listening"}]),
+        10.0,
+    )
+    .await;
+    elapsed_near(started, 0.8, 0.3);
+    assert_eq!(r["conditions"][0]["observed"], json!({"match":"listening"}));
+    p.cleanup(&mut j).unwrap();
+}
+#[tokio::test]
+async fn wait_for_port_and_http_fire_when_the_server_starts() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(30));
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let server = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .unwrap();
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buffer = [0; 1024];
+                let _ = socket.read(&mut buffer).await;
+                let _ = socket
+                    .write_all(b"HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n")
+                    .await;
+            });
+        }
+    });
+    let started = std::time::Instant::now();
+    let r = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"port","port":port,"host":"127.0.0.1"}]),
+        10.0,
+    )
+    .await;
+    elapsed_near(started, 0.8, 0.35);
+    assert_eq!(r["status"], "fired");
+    let url = format!("http://127.0.0.1:{port}/health");
+    let r = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"http","url":url,"status":204}]),
+        10.0,
+    )
+    .await;
+    assert_eq!(r["conditions"][0]["observed"], json!({"status":204}));
+    server.abort();
+}
+#[tokio::test]
+async fn wait_for_reports_unfired_conditions_without_raising() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(30));
+    let started = std::time::Instant::now();
+    let r = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"path","path":"never","state":"exists"}]),
+        0.4,
+    )
+    .await;
+    elapsed_near(started, 0.4, 0.3);
+    assert_eq!(r["status"], "timeout");
+    assert_eq!(r["conditions"][0]["reason"], "deadline");
+    assert!(r["elapsed_seconds"].as_f64().unwrap() >= 0.4);
+    // Log patterns that can no longer appear, and one this engine cannot watch (look-ahead).
+    let id = start(&mut p, &mut j, "echo nothing here").await;
+    let r = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"log","handle_id":id,"pattern":"re+ady"},
+               {"kind":"log","handle_id":id,"pattern":"(?=ready)"}]),
+        10.0,
+    )
+    .await;
+    assert_eq!(r["status"], "unfired");
+    assert_eq!(r["conditions"][0]["reason"], "exited");
+    assert_eq!(r["conditions"][1]["reason"], "unsupported");
+    // The first to fire wins; the others are reported pending.
+    let id = start(&mut p, &mut j, "sleep 0.3").await;
+    let r = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"path","path":"never","state":"exists"},{"kind":"exit","handle_id":id}]),
+        10.0,
+    )
+    .await;
+    assert_eq!(r["status"], "fired");
+    assert_eq!(r["conditions"][0]["reason"], "pending");
+    assert_eq!(r["conditions"][1]["fired"], true);
+    for invalid in [
+        json!([]),
+        json!([{"kind":"exit","handle_id":"short"}]),
+        json!([{"kind":"port","port":70000,"host":"127.0.0.1"}]),
+        json!([{"kind":"path","path":"x","state":"exists","extra":1}]),
+        json!([{"kind":"http","url":"file:///etc/hosts","status":200}]),
+    ] {
+        assert!(p
+            .execute(
+                "bash.wait_for",
+                &args(json!({"conditions": invalid, "timeout": 1})),
+                &mut j
+            )
+            .await
+            .is_err());
+    }
+    p.cleanup(&mut j).unwrap();
+}
+#[tokio::test]
+async fn next_completed_returns_the_first_finished_job_as_a_notice() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(30));
+    let slow = start(&mut p, &mut j, "sleep 3").await;
+    let fast = start(&mut p, &mut j, "sleep 0.6; printf 'built ok'; exit 2").await;
+    let started = std::time::Instant::now();
+    let r = p
+        .execute(
+            "jobs.next_completed",
+            &args(json!({"handle_ids": [slow, fast], "timeout": 10})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    elapsed_near(started, 0.6, 0.3);
+    assert_eq!(
+        r["completed"],
+        json!({"id": fast, "status": "exited", "returncode": 2, "tail": "built ok", "omitted_before": 0})
+    );
+    assert_eq!(r["pending"], json!([slow]));
+    let r = p
+        .execute(
+            "jobs.next_completed",
+            &args(json!({"handle_ids": [slow], "timeout": 0.2})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(r, json!({"completed": null, "pending": [slow]}));
+    p.cleanup(&mut j).unwrap();
+}
+#[tokio::test]
+async fn log_conditions_match_regular_expressions_and_report_the_matched_text() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(30));
+    let id = start(
+        &mut p,
+        &mut j,
+        "echo 'listening on port'; sleep 0.4; echo 'server listening on 8080'; sleep 20",
+    )
+    .await;
+    let r = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"log","handle_id":id,"pattern":r"listening on \d{2,5}|^fatal"}]),
+        10.0,
+    )
+    .await;
+    assert_eq!(r["status"], "fired");
+    assert_eq!(
+        r["conditions"][0]["observed"],
+        json!({"match": "listening on 8080"})
+    );
+    p.cleanup(&mut j).unwrap();
+}
+#[tokio::test]
+async fn completion_notices_carry_the_requested_tail_and_candidates_must_be_named() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(30));
+    let id = start(&mut p, &mut j, "printf 'compiling\nbuilt ok'").await;
+    let r = p
+        .execute(
+            "jobs.next_completed",
+            &args(json!({"handle_ids": [id], "timeout": 10, "tail_bytes": 2})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(r["completed"]["tail"], "ok");
+    assert_eq!(r["completed"]["omitted_before"], 16);
+    for unnamed in [json!({"timeout": 1}), json!({"handle_ids": null, "timeout": 1})] {
+        assert!(p
+            .execute("jobs.next_completed", &args(unnamed), &mut j)
+            .await
+            .is_err());
+    }
+    let zero = json!({"handle_ids": [id], "timeout": 1, "tail_bytes": 0});
+    assert!(p
+        .execute("jobs.next_completed", &args(zero), &mut j)
+        .await
+        .is_err());
+    p.cleanup(&mut j).unwrap();
+}
+/// Executor results deserialize into the generated contract types and survive them.
+#[tokio::test]
+async fn condition_wait_results_are_generated_contract_payloads() {
+    use sikaru_sdk::api::{NextCompletedResult, WaitForResult};
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(30));
+    let id = start(&mut p, &mut j, "echo ready; exit 4").await;
+    let fired = wait_for(
+        &mut p,
+        &mut j,
+        json!([{"kind":"log","handle_id":id,"pattern":"re(a)dy"},{"kind":"path","path":"never","state":"exists"}]),
+        5.0,
+    )
+    .await;
+    let typed: WaitForResult = serde_json::from_value(fired.clone()).unwrap();
+    assert_eq!(typed.conditions.len(), 2);
+    let done = p
+        .execute(
+            "jobs.next_completed",
+            &args(json!({"handle_ids": [id], "timeout": 5})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    let typed: NextCompletedResult = serde_json::from_value(done.clone()).unwrap();
+    assert_eq!(typed.completed.map(|n| n.returncode), Some(Some(4)));
+    assert_eq!(done["completed"]["tail"], "ready\n");
+    p.cleanup(&mut j).unwrap();
+}

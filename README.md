@@ -303,6 +303,28 @@ that limit terminates the process and reports truncation. Output pages use byte
 offsets, decode UTF-8 lossily, and cap raw pages at 24 KiB so escaped control
 characters remain within the receipt's serialized size limit.
 
+#### Executor channel and polling
+
+The executor starts on the HTTP work route. When a work page advertises
+`transport: "channel"`, it opens the executor channel: a WebSocket on the same
+base URL (`https` becomes `wss`) at
+`/v1/projects/{project_id}/compute-attachments/{attachment_id}/channel`, sending
+the scoped credential only in the `Authorization: Bearer` header. Operations
+arrive as work-page frames and receipts return on the channel; heartbeats follow
+the handshake's interval, and the attachment lease is still renewed over HTTP.
+Every operation passes the same journal as polling, so a redelivered operation
+returns its recorded receipt and is never launched twice.
+
+Checkpoints, approvals and terminal or stopping states are served by the HTTP
+route. When the service selects polling, the executor polls at once. When the
+channel is lost, it reconciles and resends unacknowledged receipts over HTTP,
+then reconnects after a randomized exponential delay; after three consecutive
+failed attempts the run stays on polling. A receipt the channel does not accept
+is delivered over the HTTP route.
+
+`bash.wait` and `bash.run` return when the process exits, fails or reaches its
+timeout.
+
 ### Workspace checkpoints
 
 The native attachment executor captures the selected task workspace when a run
