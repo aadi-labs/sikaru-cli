@@ -40,8 +40,10 @@ pub async fn publish(
         .workspace_checkpoint
         .as_ref()
         .context("missing workspace capture")?;
+    // Copy the deadline first: a watch::Ref held across .await deadlocks lease renewal.
+    let deadline = *lease.borrow();
     let current = transport
-        .workspace_checkpoint(&requested.run_id, *lease.borrow())
+        .workspace_checkpoint(&requested.run_id, deadline)
         .await?;
     validate_receipt(requested, &current)?;
     match current.status {
@@ -65,8 +67,9 @@ async fn upload_chunks(
     for (hash, size) in frozen.chunk_ids()? {
         journal.verify()?;
         let bytes = frozen.chunk(&hash, size)?;
+        let deadline = *lease.borrow();
         let receipt = transport
-            .workspace_blob(run_id, &hash, bytes, *lease.borrow())
+            .workspace_blob(run_id, &hash, bytes, deadline)
             .await?;
         if receipt.sha256 != hash || receipt.size != size as i64 {
             bail!("workspace blob receipt mismatch");
@@ -84,8 +87,9 @@ async fn commit_tree(
     journal.verify()?;
     let expected = tree_digest(&frozen.tree)?;
     let tree: WorkspaceTreeInput = serde_json::from_value(frozen.tree)?;
+    let deadline = *lease.borrow();
     let receipt = transport
-        .workspace_tree(&current.run_id, &tree, *lease.borrow())
+        .workspace_tree(&current.run_id, &tree, deadline)
         .await?;
     validate_receipt(current, &receipt)?;
     if receipt.tree_id.as_deref() != Some(expected.as_str())

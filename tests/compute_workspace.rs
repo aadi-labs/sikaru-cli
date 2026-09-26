@@ -35,16 +35,53 @@ fn frozen_tree_retains_binary_modes_deletions_and_immutable_retry() {
 }
 
 #[test]
-fn capture_rejects_symlinks_and_private_state_inside_workspace() {
+fn capture_skips_symlinks_without_reading_targets() {
+    let root = tempfile::tempdir().unwrap();
+    let work = root.path().join("work");
+    let state = root.path().join("state");
+    let outside = root.path().join("outside");
+    fs::create_dir_all(work.join("src")).unwrap();
+    fs::create_dir(&state).unwrap();
+    fs::create_dir(&outside).unwrap();
+    fs::write(root.path().join("secret"), b"private").unwrap();
+    fs::write(outside.join("inner"), b"private").unwrap();
+    fs::write(work.join("src/main.py"), b"print(42)\n").unwrap();
+    symlink(root.path().join("secret"), work.join("file-link")).unwrap();
+    symlink(&outside, work.join("dir-link")).unwrap();
+    symlink("main.py", work.join("src/relative-link")).unwrap();
+    let frozen = workspace::freeze(&work, &state, "capture").unwrap();
+    let files = frozen.tree["files"].as_object().unwrap();
+    assert_eq!(files.keys().collect::<Vec<_>>(), vec!["src/main.py"]);
+    assert!(frozen
+        .chunks()
+        .unwrap()
+        .iter()
+        .all(|(_, bytes)| bytes.as_slice() != b"private"));
+}
+
+#[test]
+fn capture_versions_hard_linked_files_as_independent_copies() {
     let root = tempfile::tempdir().unwrap();
     let work = root.path().join("work");
     let state = root.path().join("state");
     fs::create_dir(&work).unwrap();
     fs::create_dir(&state).unwrap();
-    fs::write(root.path().join("secret"), b"private").unwrap();
-    symlink(root.path().join("secret"), work.join("link")).unwrap();
-    assert!(workspace::freeze(&work, &state, "capture").is_err());
-    fs::remove_file(work.join("link")).unwrap();
+    fs::write(root.path().join("cached.py"), b"cached = True\n").unwrap();
+    fs::hard_link(root.path().join("cached.py"), work.join("installed.py")).unwrap();
+    fs::write(work.join("a.txt"), b"shared\n").unwrap();
+    fs::hard_link(work.join("a.txt"), work.join("b.txt")).unwrap();
+    let frozen = workspace::freeze(&work, &state, "capture").unwrap();
+    let files = &frozen.tree["files"];
+    assert_eq!(files["installed.py"]["size"], 14);
+    assert_eq!(files["a.txt"]["sha256"], files["b.txt"]["sha256"]);
+    assert_eq!(files.as_object().unwrap().len(), 3);
+}
+
+#[test]
+fn capture_rejects_private_state_inside_workspace() {
+    let root = tempfile::tempdir().unwrap();
+    let work = root.path().join("work");
+    fs::create_dir(&work).unwrap();
     assert!(workspace::freeze(&work, &work, "capture").is_err());
 }
 

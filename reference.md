@@ -232,6 +232,7 @@ List Changesets
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--status` | `string` | No |  |
+| `--improvement` | `string` | No |  |
 
 #### `sikaru changesets promote-changeset`
 
@@ -1562,6 +1563,7 @@ List Issue Clusters
 | `--project-id` | `string` | Yes |  |
 | `--status` | `string` | No |  |
 | `--severity` | `string` | No |  |
+| `--agent-id` | `string` | No |  |
 
 #### `sikaru issue-clusters mine-project-issue-clusters`
 

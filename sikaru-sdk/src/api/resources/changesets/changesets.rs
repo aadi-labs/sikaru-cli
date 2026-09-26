@@ -51,6 +51,7 @@ impl ChangesetsClient {
                 None,
                 QueryBuilder::new()
                     .serialize("status", request.status.clone())
+                    .serialize("improvement", request.improvement.clone())
                     .build(),
                 options,
             )

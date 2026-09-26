@@ -232,7 +232,8 @@ async fn checkpoint_workspace(
 ) -> Result<()> {
     super::workspace_flow::validate(page, journal)?;
     if !page.live_handles.is_empty() {
-        reconcile(transport, journal, processes, *lease.borrow()).await?;
+        let deadline = *lease.borrow();
+        reconcile(transport, journal, processes, deadline).await?;
         return Ok(());
     }
     match super::workspace_flow::publish(transport, journal, page, lease).await {

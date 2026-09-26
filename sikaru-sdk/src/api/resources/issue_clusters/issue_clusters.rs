@@ -52,6 +52,7 @@ impl IssueClustersClient {
                 QueryBuilder::new()
                     .serialize("status", request.status.clone())
                     .serialize("severity", request.severity.clone())
+                    .serialize("agent_id", request.agent_id.clone())
                     .build(),
                 options,
             )
@@ -228,6 +229,7 @@ impl IssueClustersClient {
     ///             &"cluster_id".to_string(),
     ///             &UpdateIssueClusterStatusRequest {
     ///                 status: "status".to_string(),
+    ///                 reason: None,
     ///             },
     ///             None,
     ///         )

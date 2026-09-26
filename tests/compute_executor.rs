@@ -263,7 +263,12 @@ mod wire {
                 assert_eq!(hash, format!("{:x}", Sha256::digest(&request.body)));
                 s.blobs.insert(hash.into(), request.body.clone());
                 s.checkpoint_events.push("blob");
-                return ok(json!({"sha256":hash,"size":request.body.len()}));
+                let receipt = ok(json!({"sha256":hash,"size":request.body.len()}));
+                if self.scenario == "checkpoint_slow_upload" {
+                    // Outlasts the heartbeat interval so a renewal lands mid-upload.
+                    return receipt.set_delay(Duration::from_millis(1500));
+                }
+                return receipt;
             }
             if path.ends_with("/tree") {
                 return self.commit_tree(s, body);
@@ -540,6 +545,22 @@ mod wire {
         assert_eq!(
             state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
             format!("{:x}", Sha256::digest(b"finished"))
+        );
+    }
+    #[tokio::test]
+    async fn lease_renewal_during_checkpoint_upload_does_not_deadlock_executor() {
+        let (_root, _server, oracle, child) = launch("checkpoint_slow_upload").await;
+        let output = result(child).await;
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let state = oracle.state.lock().unwrap();
+        assert_eq!(
+            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
+            &["commit", "ack", "terminal"]
         );
     }
     #[tokio::test]

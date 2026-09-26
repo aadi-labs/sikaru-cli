@@ -310,12 +310,15 @@ completes and waits for its checkpoint to be published before reporting completi
 Checkpoints retain regular file contents, executable permissions, and the absence
 of deleted files. Keep credentials and private executor state outside the selected
 workspace: all regular files within it are included, including hidden files.
+Symbolic links are not captured and their targets are never read; commands may
+still create and use them, and a restored checkpoint omits them. Hard-linked
+files are captured by content and restore as independent copies.
 
 Publication retries reuse the same frozen capture. A lost upload response does not
 rerun commands or capture a different workspace. Keep the private state directory
 until completion so reconnecting can recover that capture. Capture waits for owned
-processes to finish and rejects symlinks, hard links, unsupported file types, and
-workspaces exceeding the capture limits instead of silently dropping files.
+processes to finish and rejects unsupported file types and workspaces exceeding the
+capture limits instead of silently dropping files.
 Checkpoints do not restore running processes or overwrite an existing local folder.
 
 ### Command definitions

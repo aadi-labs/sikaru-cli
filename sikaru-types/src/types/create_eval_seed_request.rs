@@ -4,6 +4,9 @@ use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct CreateEvalSeedRequest {
+    #[serde(rename = "agentId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
     #[serde(rename = "datasetName")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dataset_name: Option<String>,
@@ -30,6 +33,7 @@ impl CreateEvalSeedRequest {
 #[derive(Clone, PartialEq, Default, Debug)]
 #[non_exhaustive]
 pub struct CreateEvalSeedRequestBuilder {
+    agent_id: Option<String>,
     dataset_name: Option<String>,
     evaluator_name: Option<String>,
     issue_id: Option<String>,
@@ -38,6 +42,11 @@ pub struct CreateEvalSeedRequestBuilder {
 }
 
 impl CreateEvalSeedRequestBuilder {
+    pub fn agent_id(mut self, value: impl Into<String>) -> Self {
+        self.agent_id = Some(value.into());
+        self
+    }
+
     pub fn dataset_name(mut self, value: impl Into<String>) -> Self {
         self.dataset_name = Some(value.into());
         self
@@ -70,6 +79,7 @@ impl CreateEvalSeedRequestBuilder {
     /// - [`trace_ids`](CreateEvalSeedRequestBuilder::trace_ids)
     pub fn build(self) -> Result<CreateEvalSeedRequest, BuildError> {
         Ok(CreateEvalSeedRequest {
+            agent_id: self.agent_id,
             dataset_name: self.dataset_name,
             evaluator_name: self.evaluator_name,
             issue_id: self.issue_id.ok_or_else(|| BuildError::missing_field("issue_id"))?,

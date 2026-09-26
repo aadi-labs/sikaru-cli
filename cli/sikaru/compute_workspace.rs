@@ -184,6 +184,10 @@ impl Capture<'_> {
         prefix: &str,
         depth: usize,
     ) -> Result<()> {
+        // Links are not versioned; the task may still use them. Never follow one.
+        if child.file_type()?.is_symlink() {
+            return Ok(());
+        }
         let name = child
             .file_name()
             .into_string()
@@ -204,8 +208,9 @@ impl Capture<'_> {
         Ok(())
     }
     fn capture_file(&mut self, mut file: File, path: &str, before: fs::Metadata) -> Result<()> {
-        if !before.is_file() || before.nlink() != 1 {
-            bail!("workspace requires regular files without external hard links");
+        // Hard-linked files are versioned by content, as independent copies.
+        if !before.is_file() {
+            bail!("workspace requires regular files");
         }
         self.bytes = self
             .bytes
