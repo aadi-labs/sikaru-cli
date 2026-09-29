@@ -11,7 +11,7 @@ pub struct CreateManagedAgentSourceRequest {
     #[serde(default)]
     pub content_digest: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub definition: Option<HashMap<String, serde_json::Value>>,
+    pub definition: Option<AgentDefinition>,
     #[serde(rename = "exportPolicy")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub export_policy: Option<CreateManagedAgentSourceRequestExportPolicy>,
@@ -34,7 +34,7 @@ impl CreateManagedAgentSourceRequest {
 pub struct CreateManagedAgentSourceRequestBuilder {
     analysis_summary: Option<HashMap<String, serde_json::Value>>,
     content_digest: Option<String>,
-    definition: Option<HashMap<String, serde_json::Value>>,
+    definition: Option<AgentDefinition>,
     export_policy: Option<CreateManagedAgentSourceRequestExportPolicy>,
     source_kind: Option<CreateManagedAgentSourceRequestSourceKind>,
     storage_ref: Option<String>,
@@ -51,7 +51,7 @@ impl CreateManagedAgentSourceRequestBuilder {
         self
     }
 
-    pub fn definition(mut self, value: HashMap<String, serde_json::Value>) -> Self {
+    pub fn definition(mut self, value: AgentDefinition) -> Self {
         self.definition = Some(value);
         self
     }

@@ -8,7 +8,9 @@ Full command reference for `sikaru`.
 - [`sikaru agent-budgets`](#sikaru-agent-budgets)
 - [`sikaru agent-imports`](#sikaru-agent-imports)
 - [`sikaru agents`](#sikaru-agents)
+- [`sikaru capability-ceilings`](#sikaru-capability-ceilings)
 - [`sikaru changesets`](#sikaru-changesets)
+- [`sikaru checks`](#sikaru-checks)
 - [`sikaru compute-attachments`](#sikaru-compute-attachments)
 - [`sikaru compute-credentials`](#sikaru-compute-credentials)
 - [`sikaru compute-environments`](#sikaru-compute-environments)
@@ -30,6 +32,7 @@ Full command reference for `sikaru`.
 - [`sikaru execution-sessions`](#sikaru-execution-sessions)
 - [`sikaru executions`](#sikaru-executions)
 - [`sikaru feedback`](#sikaru-feedback)
+- [`sikaru git-credentials`](#sikaru-git-credentials)
 - [`sikaru harness-versions`](#sikaru-harness-versions)
 - [`sikaru harnesses`](#sikaru-harnesses)
 - [`sikaru import-sessions`](#sikaru-import-sessions)
@@ -164,6 +167,31 @@ Create Managed Session
 
 ---
 
+### `sikaru capability-ceilings`
+
+#### `sikaru capability-ceilings get`
+
+Get Capability Ceilings
+
+`GET /v1/projects/{project_id}/capability-ceilings`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru capability-ceilings update`
+
+Update Capability Ceilings
+
+`PUT /v1/projects/{project_id}/capability-ceilings`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
 ### `sikaru changesets`
 
 #### `sikaru changesets approve-changeset`
@@ -281,6 +309,58 @@ Stage Changeset
 | `--project-id` | `string` | Yes |  |
 | `--changeset-id` | `string` | Yes |  |
 | `--json` | `JSON` | No | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru checks`
+
+#### `sikaru checks create`
+
+Same key and definition return the same check; a changed definition conflicts.
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/checks`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru checks list`
+
+List Checks
+
+`GET /v1/projects/{project_id}/managed-agents/{agent_slug}/checks`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+
+#### `sikaru checks list-results`
+
+List Check Results
+
+`GET /v1/projects/{project_id}/managed-agents/{agent_slug}/checks/{check_id}/results`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--check-id` | `string` | Yes |  |
+
+#### `sikaru checks run`
+
+Start the check's task as a real run of the agent's active release; the result settles later.
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/checks/{check_id}/runs`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--check-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---
 
@@ -1262,6 +1342,43 @@ Create Feedback
 
 ---
 
+### `sikaru git-credentials`
+
+#### `sikaru git-credentials create`
+
+Store a git credential for one host. The value is write-only.
+
+`POST /v1/projects/{project_id}/git-credentials`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru git-credentials grant`
+
+Let an agent use a git credential for its declared repos.
+
+`POST /v1/projects/{project_id}/git-credentials/{credential_id}/grants`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--credential-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru git-credentials list`
+
+The project's git credentials and their grants, without values.
+
+`GET /v1/projects/{project_id}/git-credentials`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+---
+
 ### `sikaru harness-versions`
 
 #### `sikaru harness-versions create-harness-version`
@@ -1637,6 +1754,18 @@ Get Judge Alignment
 
 ### `sikaru managed-agents`
 
+#### `sikaru managed-agents create-definition-revision`
+
+Stage a changed definition as a draft revision; the live definition is a no-op.
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/definition-revisions`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
 #### `sikaru managed-agents create-managed-agent`
 
 Create Managed Agent
@@ -1647,6 +1776,18 @@ Create Managed Agent
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru managed-agents get-definition-revision`
+
+Get Definition Revision
+
+`GET /v1/projects/{project_id}/managed-agents/{agent_slug}/definition-revisions/{changeset_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--changeset-id` | `string` | Yes |  |
 
 #### `sikaru managed-agents list-managed-agents`
 

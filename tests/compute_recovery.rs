@@ -322,14 +322,14 @@ async fn parked_handle_returns_terminal_state_without_restarting() {
     );
 }
 
-#[path = "../cli/sikaru/compute_workspace.rs"]
-mod workspace;
-#[path = "../cli/sikaru/compute_workspace_flow.rs"]
-mod workspace_flow;
 #[path = "../cli/sikaru/compute_runtime.rs"]
 mod runtime;
 #[path = "../cli/sikaru/compute_transport.rs"]
 mod transport;
+#[path = "../cli/sikaru/compute_workspace.rs"]
+mod workspace;
+#[path = "../cli/sikaru/compute_workspace_flow.rs"]
+mod workspace_flow;
 #[tokio::test]
 async fn external_teardown_replays_two_large_receipts_individually_before_ready() {
     use wiremock::matchers::{method, path};
@@ -451,14 +451,15 @@ async fn file_write_refuses_a_fifo_instead_of_blocking_the_lease_loop() {
     let mut p = process::Processes::new(&j, Duration::from_secs(1));
     let path = std::ffi::CString::new(b.workspace.join("pipe").to_str().unwrap()).unwrap();
     assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
-    assert!(p
+    let result = p
         .execute(
             "workspace.write_text",
             &args(json!({"path":"pipe","text":"data"})),
-            &mut j
+            &mut j,
         )
         .await
-        .is_err());
+        .unwrap();
+    assert_eq!(result["error"]["code"], "unsupported_file_type");
 }
 
 #[tokio::test]
@@ -1191,7 +1192,10 @@ async fn completion_notices_carry_the_requested_tail_and_candidates_must_be_name
         .unwrap();
     assert_eq!(r["completed"]["tail"], "ok");
     assert_eq!(r["completed"]["omitted_before"], 16);
-    for unnamed in [json!({"timeout": 1}), json!({"handle_ids": null, "timeout": 1})] {
+    for unnamed in [
+        json!({"timeout": 1}),
+        json!({"handle_ids": null, "timeout": 1}),
+    ] {
         assert!(p
             .execute("jobs.next_completed", &args(unnamed), &mut j)
             .await
@@ -1233,4 +1237,118 @@ async fn condition_wait_results_are_generated_contract_payloads() {
     assert_eq!(typed.completed.map(|n| n.returncode), Some(Some(4)));
     assert_eq!(done["completed"]["tail"], "ready\n");
     p.cleanup(&mut j).unwrap();
+}
+
+#[tokio::test]
+async fn workspace_write_creates_nested_parents() {
+    let (_root, b) = setup();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(1));
+    let result = p
+        .execute(
+            "workspace.write_text",
+            &args(json!({"path":"nested/new/main.txt","text":"ready"})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, json!({"written":true}));
+    assert_eq!(
+        std::fs::read_to_string(b.workspace.join("nested/new/main.txt")).unwrap(),
+        "ready"
+    );
+}
+
+#[tokio::test]
+async fn workspace_write_error_allows_a_corrected_write() {
+    let (_root, b) = setup();
+    std::fs::write(b.workspace.join("parent"), "keep").unwrap();
+    let mut j = open(&b);
+    let mut p = process::Processes::new(&j, Duration::from_secs(1));
+    let result = p
+        .execute(
+            "workspace.write_text",
+            &args(json!({"path":"parent/child.txt","text":"new"})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["status"], "error");
+    assert_eq!(result["path"], "parent/child.txt");
+    assert!(matches!(
+        result["error"]["code"].as_str(),
+        Some("not_a_directory" | "path_exists")
+    ));
+    assert_eq!(
+        std::fs::read_to_string(b.workspace.join("parent")).unwrap(),
+        "keep"
+    );
+    let corrected = p
+        .execute(
+            "workspace.write_text",
+            &args(json!({"path":"answer.txt","text":"done"})),
+            &mut j,
+        )
+        .await
+        .unwrap();
+    assert_eq!(corrected, json!({"written":true}));
+}
+
+#[tokio::test]
+async fn shell_launch_errors_allow_corrected_commands() {
+    for method in ["bash.run", "bash.start"] {
+        for cwd in ["missing", "file"] {
+            let (_root, b) = setup();
+            std::fs::write(b.workspace.join("file"), "keep").unwrap();
+            let mut j = open(&b);
+            let mut p = process::Processes::new(&j, Duration::from_secs(2));
+            let command = format!("printf x >> '{}'", b.workspace.join("marker").display());
+            let result = p
+                .execute(method, &args(json!({"command":command,"cwd":cwd})), &mut j)
+                .await
+                .unwrap();
+            assert_eq!(result["status"], "error");
+            assert_eq!(result["cwd"], cwd);
+            assert!(result.get("id").is_none());
+            assert!(!b.workspace.join("marker").exists());
+            let corrected = p
+                .execute("bash.run", &args(json!({"command":command})), &mut j)
+                .await
+                .unwrap();
+            assert_eq!(corrected["returncode"], 0);
+            assert_eq!(
+                std::fs::read_to_string(b.workspace.join("marker")).unwrap(),
+                "x"
+            );
+            p.cleanup(&mut j).unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn unclassified_shell_launch_failure_is_not_a_corrective_result() {
+    for method in ["bash.run", "bash.start"] {
+        let (_root, b) = setup();
+        std::os::unix::fs::symlink("loop", b.workspace.join("loop")).unwrap();
+        let mut j = open(&b);
+        let mut p = process::Processes::new(&j, Duration::from_secs(2));
+        let command = format!("printf x >> '{}'", b.workspace.join("marker").display());
+        let error = p
+            .execute(
+                method,
+                &args(json!({"command":command,"cwd":"loop"})),
+                &mut j,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .raw_os_error(),
+            Some(libc::ELOOP)
+        );
+        assert!(!b.workspace.join("marker").exists());
+        p.cleanup(&mut j).unwrap();
+    }
 }

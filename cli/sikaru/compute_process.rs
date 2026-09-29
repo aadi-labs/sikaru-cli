@@ -41,6 +41,37 @@ impl std::fmt::Display for UnknownProcessHandle {
 }
 impl std::error::Error for UnknownProcessHandle {}
 
+#[derive(Debug)]
+struct LaunchRejected {
+    code: &'static str,
+    message: &'static str,
+}
+impl std::fmt::Display for LaunchRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message)
+    }
+}
+impl std::error::Error for LaunchRejected {}
+
+fn launch_failure(error: std::io::Error) -> anyhow::Error {
+    let (code, message) = match error.raw_os_error() {
+        Some(libc::ENOENT) => (
+            "path_not_found",
+            "Shell could not start: a path component does not exist. Check cwd.",
+        ),
+        Some(libc::ENOTDIR) => (
+            "not_a_directory",
+            "Shell could not start: a path component is not a directory. Check cwd.",
+        ),
+        Some(libc::EACCES) => (
+            "permission_denied",
+            "Shell could not start: permission denied. Check cwd and executable permissions.",
+        ),
+        _ => return anyhow::Error::new(error).context("shell launch failed"),
+    };
+    LaunchRejected { code, message }.into()
+}
+
 fn process_observation(result: Result<Value>) -> Result<Value> {
     match result {
         Err(error) if error.is::<UnknownProcessHandle>() => {
@@ -156,6 +187,9 @@ impl Processes {
         spawn_args.remove("yield_seconds");
         spawn_args.remove("limit");
         let state = self.start(&spawn_args, journal, operation_key)?;
+        if state["status"] == "error" {
+            return Ok(state);
+        }
         let handle = state["id"].clone();
         let wait_args = HashMap::from([
             ("handle_id".into(), handle.clone()),
@@ -191,7 +225,16 @@ impl Processes {
         journal.verify()?;
         let id = format!("{:032x}", rand::random::<u128>());
         let (artifact, path) = journal.artifact(&id)?;
-        let mut job = Job::spawn(&id, command, &cwd, env, artifact, path, self.timeout)?;
+        let mut job = match Job::spawn(&id, command, &cwd, env, artifact, path, self.timeout) {
+            Ok(job) => job,
+            Err(error) => {
+                if let Some(rejected) = error.downcast_ref::<LaunchRejected>() {
+                    return Ok(json!({"status":"error", "cwd":args.get("cwd"), "error":{
+                        "code":rejected.code, "message":rejected.message}}));
+                }
+                return Err(error);
+            }
+        };
         if let Some(key) = operation_key {
             job.state["operation_key"] = json!(key);
         }
@@ -488,7 +531,7 @@ impl Job {
             });
         }
         let mut sink = artifact.try_clone()?;
-        let child = cmd.spawn().context("shell launch failed")?;
+        let child = cmd.spawn().map_err(launch_failure)?;
         let group = Arc::new(Mutex::new(Some(child.id() as i32)));
         let timed_out = Arc::new(AtomicBool::new(false));
         let exit = Arc::new(watch::channel(false).0);
@@ -740,20 +783,79 @@ fn resolve(workspace: &Path, path: &str) -> PathBuf {
 }
 fn write_text(args: &HashMap<String, Value>, workspace: &Path) -> Result<Value> {
     allowed(args, &["path", "text"])?;
-    let path = resolve(workspace, string(args, "path")?);
+    let requested = string(args, "path")?;
     let text = string(args, "text")?;
-    let mut file = std::fs::OpenOptions::new()
+    let path = resolve(workspace, requested);
+    match write_file(&path, text) {
+        Ok(()) => Ok(json!({"written":true})),
+        Err(error) => workspace_error(requested, error),
+    }
+}
+
+fn workspace_error(path: &str, error: anyhow::Error) -> Result<Value> {
+    use std::io::ErrorKind;
+    let observation = error
+        .downcast_ref::<std::io::Error>()
+        .and_then(|io| match io.kind() {
+            ErrorKind::NotFound => Some(("path_not_found", "A path component does not exist.")),
+            ErrorKind::PermissionDenied => Some((
+                "permission_denied",
+                "Permission denied for the requested path.",
+            )),
+            ErrorKind::NotADirectory => {
+                Some(("not_a_directory", "A path component is not a directory."))
+            }
+            ErrorKind::IsADirectory => {
+                Some(("is_a_directory", "The requested path is a directory."))
+            }
+            ErrorKind::AlreadyExists => Some(("path_exists", "A path component already exists.")),
+            ErrorKind::InvalidInput => Some(("invalid_path", "The requested path is invalid.")),
+            ErrorKind::Unsupported => Some((
+                "unsupported_file_type",
+                "The requested path must be a regular file.",
+            )),
+            _ => None,
+        });
+    match observation {
+        Some((code, message)) => Ok(json!({"status":"error", "path":path,
+            "error":{"code":code, "message":message}})),
+        None => Err(error),
+    }
+}
+
+fn open_workspace_file(path: &Path) -> Result<File> {
+    if let Ok(metadata) = std::fs::metadata(path) {
+        require_regular_file(&metadata)?;
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
         .open(path)?;
-    if !file.metadata()?.is_file() {
-        bail!("workspace.write_text requires a regular file");
-    }
+    require_regular_file(&file.metadata()?)?;
+    Ok(file)
+}
+
+fn write_file(path: &Path, text: &str) -> Result<()> {
+    let mut file = open_workspace_file(path)?;
     file.set_len(0)?;
     file.write_all(text.as_bytes())?;
     file.sync_all()?;
-    Ok(json!({"written":true}))
+    Ok(())
+}
+
+fn require_regular_file(metadata: &std::fs::Metadata) -> Result<()> {
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "workspace.write_text requires a regular file",
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn confirm_group_exit(group: i32) -> Result<()> {

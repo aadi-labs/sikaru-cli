@@ -119,3 +119,117 @@ fn frozen_chunks_remain_bound_to_original_staging_directory() {
     symlink(root.path(), &staging).unwrap();
     assert_eq!(frozen.chunks().unwrap()[0].1, b"original");
 }
+
+fn upload_scope() -> workspace::UploadScope<'static> {
+    workspace::UploadScope {
+        project_id: "project",
+        attachment_id: "attachment",
+        checkpoint_id: "capture",
+        run_id: "run",
+        workspace_generation: "generation",
+        owner_epoch: 1,
+        tree_id: "tree-one",
+    }
+}
+const ABC_HASH: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+#[test]
+fn accepted_upload_survives_reopen_only_for_the_same_capture_authority() {
+    let root = tempfile::tempdir().unwrap();
+    let work = root.path().join("work");
+    let state = root.path().join("state");
+    fs::create_dir(&work).unwrap();
+    fs::create_dir(&state).unwrap();
+    fs::write(work.join("file"), b"abc").unwrap();
+    let frozen = workspace::freeze(&work, &state, "capture").unwrap();
+    assert!(!frozen.uploaded(&upload_scope(), ABC_HASH, 3).unwrap());
+    frozen.acknowledge(&upload_scope(), ABC_HASH, 3).unwrap();
+    drop(frozen);
+    fs::write(work.join("file"), b"changed").unwrap();
+    let reopened = workspace::freeze(&work, &state, "capture").unwrap();
+    assert!(reopened.uploaded(&upload_scope(), ABC_HASH, 3).unwrap());
+    assert_eq!(reopened.chunk(ABC_HASH, 3).unwrap(), b"abc");
+    for field in [
+        "project",
+        "attachment",
+        "checkpoint",
+        "run",
+        "generation",
+        "epoch",
+        "tree",
+    ] {
+        let mut scope = upload_scope();
+        match field {
+            "project" => scope.project_id = "other",
+            "attachment" => scope.attachment_id = "other",
+            "checkpoint" => scope.checkpoint_id = "other",
+            "run" => scope.run_id = "other",
+            "generation" => scope.workspace_generation = "other",
+            "epoch" => scope.owner_epoch = 2,
+            _ => scope.tree_id = "other",
+        }
+        assert!(!reopened.uploaded(&scope, ABC_HASH, 3).unwrap(), "{field}");
+    }
+    assert!(reopened.uploaded(&upload_scope(), ABC_HASH, 4).is_err());
+}
+
+#[test]
+fn altered_upload_acknowledgments_fail_closed() {
+    for fault in [
+        "malformed",
+        "digest",
+        "size",
+        "scope",
+        "symlink",
+        "hardlink",
+        "public",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        let state = root.path().join("state");
+        fs::create_dir(&work).unwrap();
+        fs::create_dir(&state).unwrap();
+        fs::write(work.join("file"), b"abc").unwrap();
+        let frozen = workspace::freeze(&work, &state, "capture").unwrap();
+        frozen.acknowledge(&upload_scope(), ABC_HASH, 3).unwrap();
+        let staging = fs::read_dir(&state)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let receipt = fs::read_dir(staging)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("ack-"))
+            .unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+        match fault {
+            "malformed" => fs::write(&receipt, b"{").unwrap(),
+            "digest" | "size" | "scope" => {
+                match fault {
+                    "digest" => value["sha256"] = serde_json::json!("0".repeat(64)),
+                    "size" => value["size"] = serde_json::json!(4),
+                    _ => value["scope"]["owner_epoch"] = serde_json::json!(2),
+                }
+                fs::write(&receipt, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            "symlink" => {
+                let outside = root.path().join("receipt");
+                fs::rename(&receipt, &outside).unwrap();
+                symlink(outside, &receipt).unwrap();
+            }
+            "hardlink" => fs::hard_link(&receipt, root.path().join("receipt")).unwrap(),
+            _ => fs::set_permissions(&receipt, fs::Permissions::from_mode(0o644)).unwrap(),
+        }
+        assert!(
+            frozen.uploaded(&upload_scope(), ABC_HASH, 3).is_err(),
+            "{fault}"
+        );
+        assert!(
+            frozen.acknowledge(&upload_scope(), ABC_HASH, 3).is_err(),
+            "{fault}"
+        );
+    }
+}

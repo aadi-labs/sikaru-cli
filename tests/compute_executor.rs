@@ -60,6 +60,8 @@ mod wire {
         tree: Option<Value>,
         tree_id: Option<String>,
         blobs: BTreeMap<String, Vec<u8>>,
+        blob_attempts: Vec<String>,
+        upload_resumed: bool,
         checkpoint_events: Vec<&'static str>,
         http_receipts: usize,
         channel: ChannelState,
@@ -153,7 +155,10 @@ mod wire {
             self.scenario == "revoked" && self.effect.with_file_name("started").exists()
         }
         fn lifecycle(&self, s: &mut State, path: &str, body: Value) -> ResponseTemplate {
-            let a = attachment("ready", if self.scenario == "expiry" { 1 } else { 3 });
+            let mut a = attachment("ready", if self.scenario == "expiry" { 1 } else { 3 });
+            if self.scenario == "checkpoint_restart" && s.upload_resumed {
+                a["owner_epoch"] = json!(2);
+            }
             if path.ends_with("/ready") {
                 s.ready = true;
                 s.ready_body = Some(body);
@@ -161,7 +166,9 @@ mod wire {
             }
             if path.ends_with("/connect") {
                 s.ready = false;
-                return ok(attachment("starting", 3));
+                let mut starting = attachment("starting", 3);
+                starting["owner_epoch"] = a["owner_epoch"].clone();
+                return ok(starting);
             }
             if path.ends_with("/heartbeat") {
                 s.heartbeat += 1;
@@ -216,6 +223,9 @@ mod wire {
         fn work(&self, s: &mut State) -> ResponseTemplate {
             s.polls += 1;
             let mut page = self.advertised_page(s);
+            if self.scenario == "checkpoint_restart" && s.upload_resumed {
+                page["attachment"]["owner_epoch"] = json!(2);
+            }
             if !s.ready {
                 if s.lost_issued {
                     page["issued_operations"] = json!([{ "run_id":"r".repeat(128),"tool_call_id":format!("{0:0128}",0),"request_digest":"opaque-0","owner_epoch":1,"workspace_generation":"generation","method":"bash.start"}]);
@@ -249,7 +259,7 @@ mod wire {
         }
         fn checkpoint_view(&self, s: &State) -> Value {
             json!({"checkpoint_id":"capture-one","run_id":"run",
-                "workspace_generation":"generation","owner_epoch":1,
+                "workspace_generation":"generation","owner_epoch":if self.scenario == "checkpoint_restart" && s.upload_resumed {2} else {1},
                 "status":if s.tree.is_some() {"published"} else {"requested"},
                 "tree_id":s.tree_id})
         }
@@ -276,9 +286,30 @@ mod wire {
                 assert!(request.body.len() <= 1_000_000);
                 let hash = path.rsplit('/').next().unwrap();
                 assert_eq!(hash, format!("{:x}", Sha256::digest(&request.body)));
+                s.blob_attempts.push(hash.to_owned());
+                if (self.scenario == "checkpoint_retry" && s.blob_attempts.len() == 3)
+                    || (self.scenario == "checkpoint_restart"
+                        && s.blobs.len() == 2
+                        && !s.upload_resumed)
+                {
+                    std::fs::write(
+                        self.effect.with_file_name("result.txt"),
+                        "changed during retry",
+                    )
+                    .unwrap();
+                    return ResponseTemplate::new(503);
+                }
                 s.blobs.insert(hash.into(), request.body.clone());
                 s.checkpoint_events.push("blob");
-                let receipt = ok(json!({"sha256":hash,"size":request.body.len()}));
+                let receipt = match self.scenario {
+                    "checkpoint_wrong_hash" => {
+                        ok(json!({"sha256":"0".repeat(64),"size":request.body.len()}))
+                    }
+                    "checkpoint_wrong_size" => {
+                        ok(json!({"sha256":hash,"size":request.body.len()+1}))
+                    }
+                    _ => ok(json!({"sha256":hash,"size":request.body.len()})),
+                };
                 if self.scenario == "checkpoint_slow_upload" {
                     // Outlasts the heartbeat interval so a renewal lands mid-upload.
                     return receipt.set_delay(Duration::from_millis(1500));
@@ -434,7 +465,16 @@ mod wire {
             server.uri()
         };
         let command_timeout = if scenario == "channel_long" { 60 } else { 10 };
-        let bootstrap = json!({"project_id":"project","session_id":"session","attachment_id":"attachment","owner_epoch":1,"workspace_generation":"generation","journal_id":"journal","credential_id":"credential",
+        let child = spawn_executor(&path, &base_url, command_timeout, 1).await;
+        (root, server, oracle, child)
+    }
+    async fn spawn_executor(
+        path: &std::path::Path,
+        base_url: &str,
+        command_timeout: u64,
+        owner_epoch: i64,
+    ) -> tokio::process::Child {
+        let bootstrap = json!({"project_id":"project","session_id":"session","attachment_id":"attachment","owner_epoch":owner_epoch,"workspace_generation":"generation","journal_id":"journal","credential_id":"credential",
             "token":"restricted-executor-secret","workspace_provenance":{"kind":"existing_directory","identity":"original"},"workspace":path.join("workspace"),"state_dir":path.join("state"),"command_timeout_seconds":command_timeout});
         let mut child = tokio::process::Command::new(
             std::env::var("SIKARU_TEST_INSTALLED")
@@ -446,7 +486,7 @@ mod wire {
             "--bootstrap",
             "-",
             "--base-url",
-            &base_url,
+            base_url,
         ])
         .env("SIKARU_API_KEY", "controller-secret")
         .stdin(Stdio::piped())
@@ -462,7 +502,7 @@ mod wire {
             .write_all(bootstrap.to_string().as_bytes())
             .await
             .unwrap();
-        (root, server, oracle, child)
+        child
     }
     async fn result(child: tokio::process::Child) -> std::process::Output {
         tokio::time::timeout(Duration::from_secs(30), child.wait_with_output())
@@ -540,6 +580,104 @@ mod wire {
             state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
             format!("{:x}", Sha256::digest(b"finished"))
         );
+    }
+    #[tokio::test]
+    async fn workspace_checkpoint_retry_uploads_only_unacknowledged_blobs() {
+        let (_root, _server, oracle, child) = launch("checkpoint_retry").await;
+        let output = result(child).await;
+        assert!(
+            output.status.success(),
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let state = oracle.state.lock().unwrap();
+        assert_eq!(state.blobs.len(), 3);
+        assert_eq!(
+            state.blob_attempts.len(),
+            4,
+            "confirmed uploads must not repeat"
+        );
+        assert_eq!(state.blob_attempts[2], state.blob_attempts[3]);
+        assert_eq!(
+            state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
+            format!("{:x}", Sha256::digest(b"finished"))
+        );
+        assert_eq!(
+            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
+            &["commit", "ack", "terminal"]
+        );
+    }
+    #[tokio::test]
+    async fn workspace_checkpoint_new_owner_revalidates_blobs_without_recapturing_files() {
+        let (root, server, oracle, mut child) = launch("checkpoint_restart").await;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while oracle.state.lock().unwrap().blob_attempts.len() < 3 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        child.kill().await.unwrap();
+        child.wait().await.unwrap();
+        let attempted_before = {
+            let mut state = oracle.state.lock().unwrap();
+            assert_eq!(state.tree_posts, 0);
+            assert!(!state.checkpoint_events.contains(&"terminal"));
+            state.upload_resumed = true;
+            state.blob_attempts.clone()
+        };
+        let child =
+            spawn_executor(&root.path().canonicalize().unwrap(), &server.uri(), 10, 2).await;
+        let output = result(child).await;
+        assert!(
+            output.status.success(),
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let state = oracle.state.lock().unwrap();
+        assert_eq!(
+            &state.blob_attempts[attempted_before.len()..],
+            &attempted_before[..3],
+            "new authority must not reuse old acknowledgments"
+        );
+        assert_eq!(state.receipts.len(), 4, "commands must not execute twice");
+        assert_eq!(
+            state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
+            format!("{:x}", Sha256::digest(b"finished"))
+        );
+        assert_eq!(
+            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
+            &["commit", "ack", "terminal"]
+        );
+    }
+    #[tokio::test]
+    async fn workspace_checkpoint_rejects_mismatched_blob_receipts() {
+        for scenario in ["checkpoint_wrong_hash", "checkpoint_wrong_size"] {
+            let (root, _server, oracle, child) = launch(scenario).await;
+            let output = result(child).await;
+            assert_eq!(output.status.code(), Some(4));
+            let state = oracle.state.lock().unwrap();
+            assert_eq!(state.blob_attempts.len(), 1);
+            assert_eq!(state.tree_posts, 0);
+            assert!(!state.checkpoint_events.contains(&"terminal"));
+            let staging = std::fs::read_dir(root.path().join("state"))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("workspace-")
+                })
+                .unwrap();
+            assert!(!std::fs::read_dir(staging).unwrap().any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("ack-")));
+        }
     }
     #[tokio::test]
     async fn workspace_lost_commit_ack_recovers_same_capture_without_reexecution() {

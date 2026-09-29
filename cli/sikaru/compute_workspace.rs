@@ -1,5 +1,6 @@
 //! Frozen task workspace capture. Private executor state must live outside the task root.
 use anyhow::{bail, Context, Result};
+use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -20,6 +21,18 @@ const MAX_BYTES: u64 = 1 << 30;
 const MAX_ENTRIES: usize = 100_000;
 const MAX_DEPTH: usize = 128;
 static TEMPORARY_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Upload receipts are valid only for this immutable capture and authority.
+#[derive(Serialize)]
+pub struct UploadScope<'a> {
+    pub project_id: &'a str,
+    pub attachment_id: &'a str,
+    pub checkpoint_id: &'a str,
+    pub run_id: &'a str,
+    pub workspace_generation: &'a str,
+    pub owner_epoch: i64,
+    pub tree_id: &'a str,
+}
 
 pub struct FrozenWorkspace {
     pub tree: Value,
@@ -58,6 +71,14 @@ impl FrozenWorkspace {
         }
         Ok(bytes)
     }
+    pub fn uploaded(&self, scope: &UploadScope<'_>, hash: &str, size: u64) -> Result<bool> {
+        let (name, bytes) = upload_receipt(scope, hash, size)?;
+        existing_private(&self.directory, &name, &bytes)
+    }
+    pub fn acknowledge(&self, scope: &UploadScope<'_>, hash: &str, size: u64) -> Result<()> {
+        let (name, bytes) = upload_receipt(scope, hash, size)?;
+        write_private(&self.directory, &name, &bytes)
+    }
     #[cfg(test)]
     pub fn chunks(&self) -> Result<Vec<(String, Vec<u8>)>> {
         self.chunk_ids()?
@@ -65,6 +86,13 @@ impl FrozenWorkspace {
             .map(|(id, size)| Ok((id.clone(), self.chunk(&id, size)?)))
             .collect()
     }
+}
+fn upload_receipt(scope: &UploadScope<'_>, hash: &str, size: u64) -> Result<(String, Vec<u8>)> {
+    validate_hash(hash)?;
+    let authority = digest(&serde_json::to_vec(scope)?);
+    let name = format!("ack-{authority}-{hash}");
+    let bytes = serde_json::to_vec(&json!({"scope":scope,"sha256":hash,"size":size}))?;
+    Ok((name, bytes))
 }
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))

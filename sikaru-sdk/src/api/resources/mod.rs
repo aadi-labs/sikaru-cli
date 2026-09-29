@@ -5,6 +5,7 @@
 //! - **Activation**
 //! - **AgentImports**
 //! - **Agents**
+//! - **CapabilityCeilings**
 //! - **Changesets**
 //! - **ComputeAttachments**
 //! - **ComputeOperations**
@@ -28,6 +29,7 @@
 //! - **Specialists**
 //! - **Executions**
 //! - **Feedback**
+//! - **GitCredentials**
 //! - **HarnessVersions**
 //! - **AgentBudgets**
 //! - **Harnesses**
@@ -36,6 +38,7 @@
 //! - **IssueClusters**
 //! - **JudgeAlignment**
 //! - **ManagedAgents**
+//! - **Checks**
 //! - **MemoryRegistry**
 //! - **ModelGateway**
 //! - **ModelSettings**
@@ -60,7 +63,9 @@ pub mod activation;
 pub mod agent_budgets;
 pub mod agent_imports;
 pub mod agents;
+pub mod capability_ceilings;
 pub mod changesets;
+pub mod checks;
 pub mod compute_attachments;
 pub mod compute_credentials;
 pub mod compute_environments;
@@ -82,6 +87,7 @@ pub mod execution_objectives;
 pub mod execution_sessions;
 pub mod executions;
 pub mod feedback;
+pub mod git_credentials;
 pub mod harness_versions;
 pub mod harnesses;
 pub mod import_sessions;
@@ -112,6 +118,7 @@ pub struct ApiClient {
     pub activation: ActivationClient,
     pub agent_imports: AgentImportsClient,
     pub agents: AgentsClient,
+    pub capability_ceilings: CapabilityCeilingsClient,
     pub changesets: ChangesetsClient,
     pub compute_attachments: ComputeAttachmentsClient,
     pub compute_operations: ComputeOperationsClient,
@@ -135,6 +142,7 @@ pub struct ApiClient {
     pub specialists: SpecialistsClient,
     pub executions: ExecutionsClient,
     pub feedback: FeedbackClient,
+    pub git_credentials: GitCredentialsClient,
     pub harness_versions: HarnessVersionsClient,
     pub agent_budgets: AgentBudgetsClient,
     pub harnesses: HarnessesClient,
@@ -143,6 +151,7 @@ pub struct ApiClient {
     pub issue_clusters: IssueClustersClient,
     pub judge_alignment: JudgeAlignmentClient,
     pub managed_agents: ManagedAgentsClient,
+    pub checks: ChecksClient,
     pub memory_registry: MemoryRegistryClient,
     pub model_gateway: ModelGatewayClient,
     pub model_settings: ModelSettingsClient,
@@ -169,6 +178,7 @@ impl ApiClient {
             activation: ActivationClient::new(config.clone())?,
             agent_imports: AgentImportsClient::new(config.clone())?,
             agents: AgentsClient::new(config.clone())?,
+            capability_ceilings: CapabilityCeilingsClient::new(config.clone())?,
             changesets: ChangesetsClient::new(config.clone())?,
             compute_attachments: ComputeAttachmentsClient::new(config.clone())?,
             compute_operations: ComputeOperationsClient::new(config.clone())?,
@@ -192,6 +202,7 @@ impl ApiClient {
             specialists: SpecialistsClient::new(config.clone())?,
             executions: ExecutionsClient::new(config.clone())?,
             feedback: FeedbackClient::new(config.clone())?,
+            git_credentials: GitCredentialsClient::new(config.clone())?,
             harness_versions: HarnessVersionsClient::new(config.clone())?,
             agent_budgets: AgentBudgetsClient::new(config.clone())?,
             harnesses: HarnessesClient::new(config.clone())?,
@@ -200,6 +211,7 @@ impl ApiClient {
             issue_clusters: IssueClustersClient::new(config.clone())?,
             judge_alignment: JudgeAlignmentClient::new(config.clone())?,
             managed_agents: ManagedAgentsClient::new(config.clone())?,
+            checks: ChecksClient::new(config.clone())?,
             memory_registry: MemoryRegistryClient::new(config.clone())?,
             model_gateway: ModelGatewayClient::new(config.clone())?,
             model_settings: ModelSettingsClient::new(config.clone())?,
@@ -225,7 +237,9 @@ pub use activation::ActivationClient;
 pub use agent_budgets::AgentBudgetsClient;
 pub use agent_imports::AgentImportsClient;
 pub use agents::AgentsClient;
+pub use capability_ceilings::CapabilityCeilingsClient;
 pub use changesets::ChangesetsClient;
+pub use checks::ChecksClient;
 pub use compute_attachments::ComputeAttachmentsClient;
 pub use compute_credentials::ComputeCredentialsClient;
 pub use compute_environments::ComputeEnvironmentsClient;
@@ -247,6 +261,7 @@ pub use execution_objectives::ExecutionObjectivesClient;
 pub use execution_sessions::ExecutionSessionsClient;
 pub use executions::ExecutionsClient;
 pub use feedback::FeedbackClient;
+pub use git_credentials::GitCredentialsClient;
 pub use harness_versions::HarnessVersionsClient;
 pub use harnesses::HarnessesClient;
 pub use import_sessions::ImportSessionsClient;

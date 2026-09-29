@@ -1,6 +1,6 @@
 //! Customer source packaging and workflows over the generated API executor.
 use base64::{engine::general_purpose::STANDARD, Engine};
-use clap::{Arg, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use fern_cli_sdk::{
     app::CliApp,
     error::CliError,
@@ -16,6 +16,10 @@ use std::{
     path::{Component, Path},
 };
 
+#[path = "authoring_capabilities.rs"]
+mod capabilities;
+pub use capabilities::violations as ceiling_violations;
+
 fn invalid(message: impl ToString) -> CliError {
     CliError::Validation(message.to_string())
 }
@@ -24,6 +28,26 @@ fn invalid(message: impl ToString) -> CliError {
 struct Manifest {
     name: String,
     sources: Vec<Source>,
+    #[serde(default)]
+    web: Option<Value>,
+    #[serde(default)]
+    tools: Option<Value>,
+    #[serde(default)]
+    setup: Option<Value>,
+}
+
+impl Manifest {
+    /// The capability sections the manifest declares, as authored.
+    fn capabilities(&mut self) -> serde_json::Map<String, Value> {
+        [
+            ("web", self.web.take()),
+            ("tools", self.tools.take()),
+            ("setup", self.setup.take()),
+        ]
+        .into_iter()
+        .filter_map(|(key, value)| Some((key.to_owned(), value?)))
+        .collect()
+    }
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -97,12 +121,13 @@ fn validate_name(name: &str) -> Result<(), CliError> {
 }
 
 pub fn package(root: &Path) -> Result<Value, CliError> {
-    let manifest: Manifest =
+    let mut manifest: Manifest =
         serde_json::from_str(&safe_file(root, "sikaru.json")?).map_err(invalid)?;
     validate_name(&manifest.name)?;
     if manifest.sources.is_empty() || manifest.sources.len() > 100 {
         return Err(invalid("Specify between 1 and 100 sources"));
     }
+    let capabilities = manifest.capabilities();
     let mut seen = BTreeSet::new();
     let mut sources = Vec::new();
     let mut instructions = false;
@@ -176,7 +201,8 @@ pub fn package(root: &Path) -> Result<Value, CliError> {
         ));
     }
     sources.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
-    let definition = json!({"schema":"sikaru.agent.contract.v1", "sources":sources});
+    let mut definition = json!({"schema":"sikaru.agent.contract.v1", "sources":sources});
+    capabilities::attach(&mut definition, capabilities).map_err(invalid)?;
     let bytes = serde_json::to_vec(&definition).map_err(invalid)?;
     if bytes.len() > 1_000_000 {
         return Err(invalid("Packaged definition exceeds 1 MB"));
@@ -185,11 +211,27 @@ pub fn package(root: &Path) -> Result<Value, CliError> {
     Ok(json!({"name":manifest.name,"definition":definition,"contentDigest":digest}))
 }
 
+/// A new source directory whose manifest holds only `name` and `sources`.
 pub fn initialize(root: &Path, name: &str) -> Result<(), CliError> {
+    create_agent(root, name, serde_json::Map::new())
+}
+
+/// A new source directory that also scaffolds the `web`, `tools` and `setup` sections.
+pub fn initialize_with_capabilities(root: &Path, name: &str) -> Result<(), CliError> {
+    create_agent(root, name, capabilities::scaffold())
+}
+
+fn create_agent(
+    root: &Path,
+    name: &str,
+    sections: serde_json::Map<String, Value>,
+) -> Result<(), CliError> {
     validate_name(name)?;
     // Requiring a new directory prevents overwriting existing work, including symlinks.
     fs::create_dir(root).map_err(invalid)?;
-    let manifest = json!({"name":name,"sources":[{"path":"instructions.md","kind":"agent_md"}]});
+    let mut manifest =
+        json!({"name":name,"sources":[{"path":"instructions.md","kind":"agent_md"}]});
+    manifest.as_object_mut().unwrap().extend(sections);
     for (path, content) in [
         (
             "sikaru.json",
@@ -216,14 +258,41 @@ fn directory(matches: &ArgMatches) -> &Path {
 }
 fn init(matches: &ArgMatches, _: &AppContext) -> Result<(), CliError> {
     let root = directory(matches);
-    initialize(root, matches.get_one::<String>("name").unwrap())?;
+    let name = matches.get_one::<String>("name").unwrap();
+    if matches.get_flag("capabilities") {
+        initialize_with_capabilities(root, name)?;
+    } else {
+        initialize(root, name)?;
+    }
     println!("{}", json!({"directory":root,"status":"created"}));
     Ok(())
 }
 fn check(matches: &ArgMatches, _: &AppContext) -> Result<(), CliError> {
+    let package = package(directory(matches))?;
+    if let Some(path) = matches.get_one::<String>("ceilings") {
+        let ceilings =
+            serde_json::from_slice(&fs::read(path).map_err(invalid)?).map_err(invalid)?;
+        let found = ceiling_violations(&package["definition"], &ceilings).map_err(invalid)?;
+        if !found.is_empty() {
+            let reasons: Vec<_> = found
+                .iter()
+                .map(|v| {
+                    format!(
+                        "{}: {}",
+                        v["field"].as_str().unwrap_or(""),
+                        v["message"].as_str().unwrap_or("")
+                    )
+                })
+                .collect();
+            return Err(invalid(format!(
+                "The definition exceeds the project capability ceilings. {}",
+                reasons.join("; ")
+            )));
+        }
+    }
     println!(
         "{}",
-        serde_json::to_string_pretty(&package(directory(matches))?).map_err(invalid)?
+        serde_json::to_string_pretty(&package).map_err(invalid)?
     );
     Ok(())
 }
@@ -308,13 +377,24 @@ pub fn install(app: CliApp) -> CliApp {
         Command::new("init")
             .about("Create a customer agent source directory")
             .arg(Arg::new("directory").required(true))
-            .arg(Arg::new("name").long("name").default_value("my-agent")),
+            .arg(Arg::new("name").long("name").default_value("my-agent"))
+            .arg(
+                Arg::new("capabilities")
+                    .long("capabilities")
+                    .action(ArgAction::SetTrue)
+                    .help("Also scaffold the web, tools and setup sections"),
+            ),
         OpenApiBinding::handler(init),
     )
     .command(
         Command::new("check")
             .about("Validate and package explicitly listed customer source files")
-            .arg(path()),
+            .arg(path())
+            .arg(
+                Arg::new("ceilings")
+                    .long("ceilings")
+                    .help("Project capability ceilings JSON to check the definition against"),
+            ),
         OpenApiBinding::handler(check),
     )
     .command(

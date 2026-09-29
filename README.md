@@ -251,6 +251,49 @@ Source instructions and skills are Markdown. Skill assets under `scripts/`,
 `SKILL.md` in the manifest. Named agents use `agents/NAME/instructions.md` and
 `agents/NAME/skills/...`. The manifest contains customer-authored source only.
 
+#### Capabilities
+
+The manifest may also declare the agent's reach in `web`, `tools`, and `setup`.
+`check` validates these sections locally and copies them into the definition as
+written. A manifest without them packages exactly as before. By default `init`
+writes only `name` and `sources`. `init --capabilities` also writes `web` and
+`setup` with their defaults: hosted web search, no domain lists, and no setup.
+It writes `tools` empty, so every built-in tool keeps its defaults. The Python
+SDK's `compile_directory` accepts the same sections and produces the same
+definition and content digest.
+
+```json
+{
+  "name": "my-agent",
+  "sources": [{"path": "instructions.md", "kind": "agent_md"}],
+  "web": {"provider": "sikaru", "allow_domains": ["docs.example.com"], "block_domains": []},
+  "tools": {"bash": {"policy": "require_approval"}, "memory": {"enabled": false}},
+  "setup": {
+    "packages": {"pip": ["pandas==2.2"], "npm": []},
+    "commands": ["make deps"],
+    "repos": [{"url": "https://git.example.com/team/app", "path": "app", "git_credential": "GIT_CREDENTIAL_ID"}]
+  }
+}
+```
+
+- `web.provider` is `"sikaru"` or `{"connection_id": ..., "tool": ...}`. The second form names a search tool from a connection granted to the agent.
+- Domains are bare lowercase hostnames. A domain cannot be in both lists.
+- Built-in tools are `bash`, `workspace`, `agents`, `memory`, `web_search`, and `web_fetch`. Each has `enabled`, which defaults to `true`, and `policy`: `allow`, `require_approval`, or `deny`.
+- Tool policy covers tool calls only. Code the agent runs in its sandbox is bounded by the sandbox and its network allowlist.
+- Setup repos use credential-free `https` URLs and relative, non-overlapping workspace paths. A private repo names a git credential granted to the agent.
+
+To check the definition against your project's capability ceilings, save them as
+JSON and pass the file:
+
+```sh
+sikaru-authoring check my-agent --ceilings ceilings.json
+```
+
+The file can hold either the ceilings object or the full response from the
+capability-ceilings API. `check` fails and names each conflicting field when the
+definition explicitly exceeds a ceiling. Reach the definition leaves unset never
+conflicts; the service bounds it with the project's ceilings on every run.
+
 `dev` creates an inactive draft and a hosted session explicitly bound to the draft
 environment. It uses the same generated API executor, credentials and base URL as
 other commands. A short source digest is appended to the draft slug; editing

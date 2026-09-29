@@ -2,7 +2,7 @@
 use super::{
     journal::Journal,
     transport::Transport,
-    workspace::{self, FrozenWorkspace},
+    workspace::{self, FrozenWorkspace, UploadScope},
 };
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -54,26 +54,42 @@ pub async fn publish(
         _ => bail!("workspace checkpoint unsupported by this execution"),
     }
     let frozen = freeze(journal, &current.checkpoint_id).await?;
-    upload_chunks(transport, journal, &current.run_id, &frozen, lease).await?;
-    commit_tree(transport, journal, &current, frozen, lease).await
+    let tree_id = tree_digest(&frozen.tree)?;
+    upload_chunks(transport, journal, &current, &frozen, &tree_id, lease).await?;
+    commit_tree(transport, journal, &current, frozen, &tree_id, lease).await
 }
 async fn upload_chunks(
     transport: &Transport,
     journal: &Journal,
-    run_id: &str,
+    current: &WorkspaceCheckpointView,
     frozen: &FrozenWorkspace,
+    tree_id: &str,
     lease: &watch::Receiver<Instant>,
 ) -> Result<()> {
+    let scope = UploadScope {
+        project_id: &journal.binding.project_id,
+        attachment_id: &journal.binding.attachment_id,
+        checkpoint_id: &current.checkpoint_id,
+        run_id: &current.run_id,
+        workspace_generation: &current.workspace_generation,
+        owner_epoch: current.owner_epoch,
+        tree_id,
+    };
     for (hash, size) in frozen.chunk_ids()? {
         journal.verify()?;
+        if frozen.uploaded(&scope, &hash, size)? {
+            continue;
+        }
         let bytes = frozen.chunk(&hash, size)?;
         let deadline = *lease.borrow();
         let receipt = transport
-            .workspace_blob(run_id, &hash, bytes, deadline)
+            .workspace_blob(&current.run_id, &hash, bytes, deadline)
             .await?;
         if receipt.sha256 != hash || receipt.size != size as i64 {
             bail!("workspace blob receipt mismatch");
         }
+        journal.verify()?;
+        frozen.acknowledge(&scope, &hash, size)?;
     }
     Ok(())
 }
@@ -82,17 +98,17 @@ async fn commit_tree(
     journal: &Journal,
     current: &WorkspaceCheckpointView,
     frozen: FrozenWorkspace,
+    expected: &str,
     lease: &watch::Receiver<Instant>,
 ) -> Result<()> {
     journal.verify()?;
-    let expected = tree_digest(&frozen.tree)?;
     let tree: WorkspaceTreeInput = serde_json::from_value(frozen.tree)?;
     let deadline = *lease.borrow();
     let receipt = transport
         .workspace_tree(&current.run_id, &tree, deadline)
         .await?;
     validate_receipt(current, &receipt)?;
-    if receipt.tree_id.as_deref() != Some(expected.as_str())
+    if receipt.tree_id.as_deref() != Some(expected)
         || receipt.status != WorkspaceCheckpointViewStatus::Published
     {
         bail!("workspace tree receipt mismatch");
