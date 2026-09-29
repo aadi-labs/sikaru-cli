@@ -102,6 +102,12 @@ pub fn command() -> clap::Command {
                 .default_value("3600")
                 .value_parser(clap::value_parser!(u64).range(1..=86400)),
         )
+        .arg(
+            clap::Arg::new("no-workspace-checkpoints")
+                .long("no-workspace-checkpoints")
+                .action(clap::ArgAction::SetTrue)
+                .hide(true),
+        )
 }
 pub async fn execute(
     m: &clap::ArgMatches,
@@ -300,7 +306,7 @@ async fn execute_saved(
     validate_remote(c, s, &a).await?;
     let bootstrap = acquire_bootstrap(c, s, &a, path).await?;
     let credential_id = bootstrap.credential_id.clone();
-    let mut result = run_attached(m, ctx, c, s, &a, text, bootstrap).await?;
+    let mut result = run_attached(m, ctx, c, s, &a, path, text, bootstrap).await?;
     revoke_after_cleanup(c, s, &credential_id, &mut result).await;
     enrich(c, s, &mut result).await;
     Ok(result)
@@ -376,6 +382,7 @@ async fn run_attached(
     c: &ApiClient,
     s: &mut State<Saved>,
     a: &AttachmentView,
+    path: &std::path::Path,
     text: Option<String>,
     bootstrap: Bootstrap,
 ) -> Result<Value> {
@@ -386,9 +393,12 @@ async fn run_attached(
         timeout: Some(Duration::from_secs(*m.get_one::<u64>("timeout").unwrap())),
         stop: Some(receiver),
         admission: Some(admission),
+        skip_checkpoints: m.get_flag("no-workspace-checkpoints"),
+        private_dirs: vec![path.to_owned()],
+
         interactive: super::chat::is_interactive(m),
     };
-    let http = ctx.http_config().build_client()?;
+    let http = super::transport::HttpIdentity::from_config(ctx.http_config())?;
     let serving = async {
         let result =
             runtime::serve_with_options(bootstrap, ctx.effective_base_url(), http, options).await;

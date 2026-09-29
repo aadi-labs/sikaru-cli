@@ -9,6 +9,7 @@ tests/auto_improve.rs
 tests/event_stream.rs
 tests/execution_environment.rs
 tests/sdk_retry_policy.rs
+tests/support/**
 tests/compute_executor.rs
 tests/compute_recovery.rs
 tests/compute_contract.rs
@@ -26,6 +27,8 @@ cli/sikaru/compute.rs
 cli/sikaru/compute_config.rs
 cli/sikaru/compute_journal.rs
 cli/sikaru/compute_process.rs
+cli/sikaru/compute_workspace.rs
+cli/sikaru/compute_workspace_flow.rs
 cli/sikaru/compute_transport.rs
 cli/sikaru/compute_runtime.rs
 
@@ -41,3 +44,8 @@ cli/sikaru/compute_input.rs
 cli/sikaru/compute_diagnostics.rs
 cli/sikaru/compute_chat.rs
 cli/sikaru/compute_doctor.rs
+cli/sikaru/compute_checkpoint.rs
+cli/sikaru/compute_checkpoint_repo.rs
+cli/sikaru/compute_git_http.rs
+tests/compute_checkpoint_repo.rs
+tests/compute_git_http.rs

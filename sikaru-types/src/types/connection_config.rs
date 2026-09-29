@@ -5,6 +5,8 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct ConnectionConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_hosts: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<ConnectionConfigAuth>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
@@ -27,6 +29,7 @@ impl ConnectionConfig {
 #[derive(Clone, PartialEq, Default, Debug)]
 #[non_exhaustive]
 pub struct ConnectionConfigBuilder {
+    allowed_hosts: Option<Vec<String>>,
     auth: Option<ConnectionConfigAuth>,
     endpoint: Option<String>,
     header_name: Option<String>,
@@ -36,6 +39,11 @@ pub struct ConnectionConfigBuilder {
 }
 
 impl ConnectionConfigBuilder {
+    pub fn allowed_hosts(mut self, value: Vec<String>) -> Self {
+        self.allowed_hosts = Some(value);
+        self
+    }
+
     pub fn auth(mut self, value: ConnectionConfigAuth) -> Self {
         self.auth = Some(value);
         self
@@ -69,6 +77,7 @@ impl ConnectionConfigBuilder {
     /// Consumes the builder and constructs a [`ConnectionConfig`].
     pub fn build(self) -> Result<ConnectionConfig, BuildError> {
         Ok(ConnectionConfig {
+            allowed_hosts: self.allowed_hosts,
             auth: self.auth,
             endpoint: self.endpoint,
             header_name: self.header_name,

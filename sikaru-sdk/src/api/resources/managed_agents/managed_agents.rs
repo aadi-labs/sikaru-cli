@@ -130,7 +130,10 @@ impl ManagedAgentsClient {
     ///             &DefinitionRevisionRequest {
     ///                 content_digest: "contentDigest".to_string(),
     ///                 definition: AgentDefinition {
+    ///                     access: None,
+    ///                     budget: None,
     ///                     instructions: None,
+    ///                     model: None,
     ///                     outcomes: None,
     ///                     schema: AgentDefinitionSchema::SikaruAgentContractV1,
     ///                     setup: None,

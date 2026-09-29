@@ -497,4 +497,88 @@ impl RunsClient {
             )
             .await
     }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .runs
+    ///         .get_transcript(&"project_id".to_string(), &"run_id".to_string(), None)
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn get_transcript(
+        &self,
+        project_id: &str,
+        run_id: &str,
+        options: Option<RequestOptions>,
+    ) -> Result<RunTranscript, ApiError> {
+        self.http_client
+            .execute_request(
+                Method::GET,
+                &format!("v1/projects/{}/runs/{}/transcript", project_id, run_id),
+                None,
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .runs
+    ///         .stream_transcript_events(
+    ///             &"project_id".to_string(),
+    ///             &"run_id".to_string(),
+    ///             &StreamTranscriptEventsQueryRequest {
+    ///                 ..Default::default()
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn stream_transcript_events(
+        &self,
+        project_id: &str,
+        run_id: &str,
+        request: &StreamTranscriptEventsQueryRequest,
+        options: Option<RequestOptions>,
+    ) -> Result<SseStream<TranscriptEvent>, ApiError> {
+        self.http_client
+            .execute_sse_request(
+                Method::GET,
+                &format!(
+                    "v1/projects/{}/runs/{}/transcript/events/stream",
+                    project_id, run_id
+                ),
+                None,
+                QueryBuilder::new()
+                    .int("after", request.after.clone())
+                    .build(),
+                options,
+                None,
+            )
+            .await
+    }
 }

@@ -322,14 +322,16 @@ async fn parked_handle_returns_terminal_state_without_restarting() {
     );
 }
 
+#[path = "../cli/sikaru/compute_checkpoint.rs"]
+mod checkpoint;
+#[path = "../cli/sikaru/compute_checkpoint_repo.rs"]
+mod checkpoint_repo;
+#[path = "../cli/sikaru/compute_git_http.rs"]
+mod git_http;
 #[path = "../cli/sikaru/compute_runtime.rs"]
 mod runtime;
 #[path = "../cli/sikaru/compute_transport.rs"]
 mod transport;
-#[path = "../cli/sikaru/compute_workspace.rs"]
-mod workspace;
-#[path = "../cli/sikaru/compute_workspace_flow.rs"]
-mod workspace_flow;
 #[tokio::test]
 async fn external_teardown_replays_two_large_receipts_individually_before_ready() {
     use wiremock::matchers::{method, path};
@@ -385,9 +387,20 @@ async fn external_teardown_replays_two_large_receipts_individually_before_ready(
         .expect(1)
         .mount(&server)
         .await;
-    let result = runtime::serve(b, server.uri(), reqwest::Client::new())
-        .await
-        .unwrap();
+    let result = runtime::serve_with_options(
+        b,
+        server.uri(),
+        transport::HttpIdentity {
+            client: reqwest::Client::new(),
+            user_agent: "sikaru-cli/test".into(),
+        },
+        runtime::RunOptions {
+            skip_checkpoints: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(result["status"], "completed");
 }
 #[test]

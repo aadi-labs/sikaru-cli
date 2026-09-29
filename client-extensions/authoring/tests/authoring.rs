@@ -96,7 +96,7 @@ fn rejects_oversized_sources() {
     assert!(authoring::package(&root).is_err());
 }
 #[tokio::test]
-async fn dev_uses_shared_executor_and_keeps_agent_inactive() {
+async fn dev_tests_saved_revision_without_creating_an_agent() {
     use wiremock::{
         matchers::{body_partial_json, header, method, path},
         Mock, MockServer, ResponseTemplate,
@@ -105,18 +105,15 @@ async fn dev_uses_shared_executor_and_keeps_agent_inactive() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("agent");
     authoring::initialize(&root, "demo").unwrap();
-    let package = authoring::package(&root).unwrap();
-    let digest = package["contentDigest"].as_str().unwrap();
-    let slug = format!("demo-draft-{}", &digest[7..19]);
-    Mock::given(method("POST")).and(header("authorization", "Bearer companion-test-key")).and(path("/v1/projects/project/managed-agents"))
-        .and(body_partial_json(serde_json::json!({"agentSlug":slug,"status":"inactive","source":{"definition":package["definition"],"contentDigest":digest}})))
-        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({"managedAgent":{"id":"draft"}}))).expect(1).mount(&server).await;
+    let slug = "demo";
+    Mock::given(method("POST")).and(path("/v1/projects/project/managed-agents"))
+        .respond_with(ResponseTemplate::new(500)).expect(0).mount(&server).await;
     Mock::given(method("POST")).and(header("authorization", "Bearer companion-test-key"))
         .and(path(format!(
             "/v1/projects/project/harnesses/{slug}/execution-sessions"
         )))
         .and(body_partial_json(
-            serde_json::json!({"environment":"draft","tenant_id":"tenant","user_id":"user"}),
+            serde_json::json!({"environment":"draft","draft_revision":7,"tenant_id":"tenant","user_id":"user"}),
         ))
         .respond_with(
             ResponseTemplate::new(201)
@@ -145,7 +142,9 @@ async fn dev_uses_shared_executor_and_keeps_agent_inactive() {
             .env("SIKARU_API_KEY", "companion-test-key")
             .args([
                 "dev",
-                root.to_str().unwrap(),
+                "demo",
+                "--revision",
+                "7",
                 "--project",
                 "project",
                 "--tenant",
@@ -160,7 +159,7 @@ async fn dev_uses_shared_executor_and_keeps_agent_inactive() {
         })
         .await
         .unwrap();
-    assert!(code.status.success(), "{}", String::from_utf8_lossy(&code.stderr));
+    assert!(code.status.success(), "stderr={} stdout={}", String::from_utf8_lossy(&code.stderr), String::from_utf8_lossy(&code.stdout));
 }
 #[test]
 fn dev_dry_run_never_contacts_the_server() {
@@ -175,7 +174,9 @@ fn dev_dry_run_never_contacts_the_server() {
     .try_run_from([
         "sikaru-authoring",
         "dev",
-        root.to_str().unwrap(),
+        "demo",
+        "--revision",
+        "7",
         "--project",
         "project",
         "--tenant",

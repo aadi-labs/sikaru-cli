@@ -17,7 +17,12 @@ fn primary_binary_has_fresh_exec_and_explicit_resume() {
     assert!(help.contains("--workspace") && help.contains("--resume"));
 }
 #[cfg(unix)]
+#[path = "support/git_remote.rs"]
+mod git_remote;
+
+#[cfg(unix)]
 mod workflow {
+    use super::git_remote;
     use serde_json::{json, Value};
     use std::{
         collections::HashMap,
@@ -27,6 +32,9 @@ mod workflow {
     use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
     #[derive(Default)]
     struct Server {
+        remote_mints: usize,
+        records: Vec<Value>,
+        order: Vec<&'static str>,
         sessions: usize,
         models: Vec<Value>,
         environments: usize,
@@ -43,6 +51,7 @@ mod workflow {
     struct Oracle {
         state: Arc<Mutex<Server>>,
         scenario: &'static str,
+        git: Option<Arc<git_remote::GitRemote>>,
     }
     fn ok(v: Value) -> ResponseTemplate {
         ResponseTemplate::new(200).set_body_json(v)
@@ -55,6 +64,9 @@ mod workflow {
                 return response;
             }
             let mut s = self.state.lock().unwrap();
+            if let Some(response) = self.workspace(&mut s, path, &body) {
+                return response;
+            }
             if path.ends_with("/execution-sessions") {
                 s.sessions += 1;
                 s.models.push(body["model"].clone());
@@ -90,18 +102,43 @@ mod workflow {
                 );
             }
             if path.contains("/runs/") {
-                let mut result = json!({"runId":"run","status":"completed","eventsUrl":"events","harnessId":"agent","harnessVersionId":"version"});
-                if self.scenario == "completedresume" {
-                    result["usageSummary"] = json!({"complete":true,"n_input_tokens":100,"n_cache_tokens":20,"n_output_tokens":10});
-                    result["costSummary"] = json!({"cost_usd":0.001,"chargeable_cost_usd":0});
-                    result["latencyMs"] = json!(125);
-                }
-                return ok(result);
+                return self.run_result();
             }
             self.lifecycle(r, &mut s, path, body)
         }
     }
     impl Oracle {
+        fn run_result(&self) -> ResponseTemplate {
+            let mut result = json!({"runId":"run","status":"completed","eventsUrl":"events","harnessId":"agent","harnessVersionId":"version"});
+            if self.scenario == "completedresume" {
+                result["usageSummary"] = json!({"complete":true,"n_input_tokens":100,"n_cache_tokens":20,"n_output_tokens":10});
+                result["costSummary"] = json!({"cost_usd":0.001,"chargeable_cost_usd":0});
+                result["latencyMs"] = json!(125);
+            }
+            ok(result)
+        }
+        fn workspace(&self, s: &mut Server, path: &str, body: &Value) -> Option<ResponseTemplate> {
+            if path.ends_with("/workspace-remote") {
+                let Some(git) = &self.git else {
+                    return Some(ResponseTemplate::new(404));
+                };
+                s.remote_mints += 1;
+                return Some(ok(
+                    json!({"remote_url":git.url(),"username":"x-token","token":format!("token-{}",s.remote_mints),
+                    "branch":git_remote::BRANCH,"head_sha":git.head(),"ignore_defaults":git_remote::IGNORE_DEFAULTS,
+                    "expires_at":git_remote::rfc3339(git_remote::unix_now()+900),"max_push_bytes":100_000_000}),
+                ));
+            }
+            if path.ends_with("/workspace-checkpoints") {
+                s.records.push(body.clone());
+                s.order.push("record");
+                return Some(ok(
+                    json!({"commit_sha":body["commit_sha"],"branch":git_remote::BRANCH,"recorded_at":"2026-09-29T00:00:00Z"}),
+                ));
+            }
+
+            None
+        }
         fn environment(&self, s: &mut Server, body: &Value) -> ResponseTemplate {
             s.environments += 1;
             if self.scenario == "partialsetup" && s.environments == 1 {
@@ -124,6 +161,7 @@ mod workflow {
                 );
             }
             if path.ends_with("/revoke") {
+                s.order.push("revoke");
                 return ok(json!({"credential_id":"credential","revoked":true}));
             }
             let id = path.split('/').nth(5).unwrap();
@@ -164,6 +202,7 @@ mod workflow {
                     )
                 }
                 "cleanup" => {
+                    s.order.push("cleanup");
                     a["status"] = json!("cleaned");
                     a["cleanup_status"] = json!("confirmed");
                     s.attachments.insert(id.to_owned(), a.clone());
@@ -279,6 +318,161 @@ mod workflow {
         });
         (output.status.code().unwrap(), value)
     }
+    async fn setup_with_remote(
+        scenario: &'static str,
+    ) -> (
+        MockServer,
+        Arc<Mutex<Server>>,
+        tempfile::TempDir,
+        Arc<git_remote::GitRemote>,
+    ) {
+        let server = MockServer::start().await;
+        let state = Arc::new(Mutex::new(Server::default()));
+        let git = Arc::new(git_remote::GitRemote::start(git_remote::Faults::default()).await);
+        Mock::given(wiremock::matchers::any())
+            .respond_with(Oracle {
+                state: state.clone(),
+                scenario,
+                git: Some(git.clone()),
+            })
+            .mount(&server)
+            .await;
+        (server, state, tempfile::tempdir().unwrap(), git)
+    }
+    async fn launch_output(
+        server: &MockServer,
+        workspace: &std::path::Path,
+        extra: &[&str],
+    ) -> std::process::Output {
+        tokio::time::timeout(
+            Duration::from_secs(35),
+            tokio::process::Command::new(
+                std::env::var("SIKARU_TEST_INSTALLED")
+                    .unwrap_or_else(|_| env!("CARGO_BIN_EXE_sikaru").to_owned()),
+            )
+            .env("SIKARU_API_KEY", "controller-secret")
+            .env("PATH", "/no-python-runtime")
+            .args([
+                "--base-url",
+                &server.uri(),
+                "exec",
+                "--project",
+                "project",
+                "--workspace",
+                workspace.to_str().unwrap(),
+            ])
+            .args(extra)
+            .output(),
+        )
+        .await
+        .expect("workflow hung")
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn hidden_flag_disables_workspace_checkpoints_without_remote_calls() {
+        let (server, state, dir, git) = setup_with_remote("completed").await;
+        let workspace = dir.path().canonicalize().unwrap();
+        let output = launch_output(
+            &server,
+            &workspace,
+            &[
+                "--agent",
+                "agent",
+                "--prompt",
+                "write",
+                "--no-workspace-checkpoints",
+            ],
+        )
+        .await;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let events = git_remote::json_events(&output.stderr);
+        let skipped: Vec<_> = events
+            .iter()
+            .filter(|e| e["event"] == "checkpoint_skipped")
+            .collect();
+        assert_eq!(
+            skipped,
+            vec![&json!({"event":"checkpoint_skipped","reason":"disabled"})]
+        );
+        assert!(events.iter().all(|e| !matches!(
+            e["event"].as_str(),
+            Some(
+                "run_finished"
+                    | "checkpoint_started"
+                    | "checkpoint_progress"
+                    | "checkpoint_pushed"
+                    | "checkpoint_failed"
+            )
+        )));
+        let s = state.lock().unwrap();
+        assert_eq!((s.remote_mints, s.records.len()), (0, 0));
+        assert!(git.head().is_none() && git.seen.lock().unwrap().pushes_started == 0);
+        let mut stack = vec![workspace.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                assert_ne!(
+                    entry.file_name(),
+                    "workspace.git",
+                    "no private repository is created"
+                );
+                if entry.file_type().unwrap().is_dir() {
+                    stack.push(entry.path());
+                }
+            }
+        }
+    }
+    #[test]
+    fn hidden_flag_is_absent_from_help() {
+        for args in [&["exec", "--help"][..], &["compute", "serve", "--help"][..]] {
+            let out = std::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+            assert!(
+                !String::from_utf8_lossy(&out.stdout).contains("no-workspace-checkpoints"),
+                "{args:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn exec_records_one_checkpoint_before_cleanup_and_revocation() {
+        let (server, state, dir, git) = setup_with_remote("completed").await;
+        let workspace = dir.path().canonicalize().unwrap();
+        let output = launch_output(
+            &server,
+            &workspace,
+            &["--agent", "agent", "--prompt", "write"],
+        )
+        .await;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["status"], "completed");
+        assert_eq!(result["credential_revoked"], true);
+        let head = git.head().expect("one checkpoint");
+        let tree: Vec<_> = git.tree(&head).into_iter().map(|(_, path)| path).collect();
+        assert!(tree.contains(&"output.txt".to_owned()));
+        assert!(
+            tree.iter().all(|path| !path.starts_with(".sikaru-")),
+            "{tree:?}"
+        );
+        let s = state.lock().unwrap();
+        assert_eq!(s.records.len(), 1);
+        assert_eq!(s.records[0]["trigger"], "turn");
+        assert_eq!(s.records[0]["run_id"], "run");
+        assert_eq!(s.order, vec!["record", "cleanup", "revoke"]);
+    }
+
     async fn setup(scenario: &'static str) -> (MockServer, Arc<Mutex<Server>>, tempfile::TempDir) {
         let server = MockServer::start().await;
         let state = Arc::new(Mutex::new(Server::default()));
@@ -286,6 +480,7 @@ mod workflow {
             .respond_with(Oracle {
                 state: state.clone(),
                 scenario,
+                git: None,
             })
             .mount(&server)
             .await;
@@ -1000,17 +1195,33 @@ async fn run_inspection_uses_authenticated_generated_transport() {
 
 #[tokio::test]
 async fn run_inspection_preserves_access_rejection_without_response_details() {
-    use wiremock::{matchers::{method, path}, Mock, MockServer, ResponseTemplate};
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/projects/project/runs/run"))
-        .respond_with(ResponseTemplate::new(403).set_body_json(
-            serde_json::json!({"detail": "sensitive-upstream-detail"})))
-        .mount(&server).await;
+        .respond_with(
+            ResponseTemplate::new(403)
+                .set_body_json(serde_json::json!({"detail": "sensitive-upstream-detail"})),
+        )
+        .mount(&server)
+        .await;
     let result = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
         .env("SIKARU_API_KEY", "test-key")
-        .args(["--base-url", &server.uri(), "inspect-run", "--project-id", "project", "--run-id", "run"])
-        .output().await.unwrap();
+        .args([
+            "--base-url",
+            &server.uri(),
+            "inspect-run",
+            "--project-id",
+            "project",
+            "--run-id",
+            "run",
+        ])
+        .output()
+        .await
+        .unwrap();
     assert!(!result.status.success());
     let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(value["error"]["code"], 403);

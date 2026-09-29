@@ -9,12 +9,6 @@ pub mod journal;
 #[path = "compute_process.rs"]
 pub mod process;
 #[cfg(unix)]
-#[path = "compute_workspace.rs"]
-pub mod workspace;
-#[cfg(unix)]
-#[path = "compute_workspace_flow.rs"]
-pub mod workspace_flow;
-#[cfg(unix)]
 #[path = "compute_runtime.rs"]
 pub mod runtime;
 #[cfg(unix)]
@@ -99,6 +93,12 @@ pub fn install(app: CliApp) -> CliApp {
                                     .long("bootstrap")
                                     .required(true)
                                     .help("Private bootstrap JSON file, or - for stdin"),
+                            )
+                            .arg(
+                                clap::Arg::new("no-workspace-checkpoints")
+                                    .long("no-workspace-checkpoints")
+                                    .action(clap::ArgAction::SetTrue)
+                                    .hide(true),
                             ),
                     )
                     .subcommand(worker::command()),
@@ -130,10 +130,14 @@ async fn execute(
 ) -> anyhow::Result<serde_json::Value> {
     match m.subcommand() {
         Some(("serve", options)) => {
-            runtime::serve(
+            runtime::serve_with_options(
                 config::Bootstrap::read(options.get_one::<String>("bootstrap").unwrap())?,
                 ctx.effective_base_url(),
-                ctx.http_config().build_client()?,
+                transport::HttpIdentity::from_config(ctx.http_config())?,
+                runtime::RunOptions {
+                    skip_checkpoints: options.get_flag("no-workspace-checkpoints"),
+                    ..Default::default()
+                },
             )
             .await
         }
@@ -223,3 +227,13 @@ fn inspection_error(error: anyhow::Error) -> fern_cli_sdk::error::CliError {
         _ => CliError::api(500, "Run inspection failed", "inspectionError"),
     }
 }
+
+#[cfg(unix)]
+#[path = "compute_checkpoint.rs"]
+pub mod checkpoint;
+#[cfg(unix)]
+#[path = "compute_checkpoint_repo.rs"]
+pub mod checkpoint_repo;
+#[cfg(unix)]
+#[path = "compute_git_http.rs"]
+pub mod git_http;

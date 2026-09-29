@@ -3,10 +3,16 @@ pub use crate::prelude::*;
 use super::*;
 
 /// The customer-authored `sikaru.agent.contract.v1` agent definition.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub access: Option<HashMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<AgentDocumentBudget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcomes: Option<Vec<String>>,
     pub schema: AgentDefinitionSchema,
@@ -29,7 +35,10 @@ impl AgentDefinition {
 #[derive(Clone, PartialEq, Default, Debug)]
 #[non_exhaustive]
 pub struct AgentDefinitionBuilder {
+    access: Option<HashMap<String, serde_json::Value>>,
+    budget: Option<AgentDocumentBudget>,
     instructions: Option<String>,
+    model: Option<String>,
     outcomes: Option<Vec<String>>,
     schema: Option<AgentDefinitionSchema>,
     setup: Option<AgentSetup>,
@@ -39,8 +48,23 @@ pub struct AgentDefinitionBuilder {
 }
 
 impl AgentDefinitionBuilder {
+    pub fn access(mut self, value: HashMap<String, serde_json::Value>) -> Self {
+        self.access = Some(value);
+        self
+    }
+
+    pub fn budget(mut self, value: AgentDocumentBudget) -> Self {
+        self.budget = Some(value);
+        self
+    }
+
     pub fn instructions(mut self, value: impl Into<String>) -> Self {
         self.instructions = Some(value.into());
+        self
+    }
+
+    pub fn model(mut self, value: impl Into<String>) -> Self {
+        self.model = Some(value.into());
         self
     }
 
@@ -79,7 +103,10 @@ impl AgentDefinitionBuilder {
     /// - [`schema`](AgentDefinitionBuilder::schema)
     pub fn build(self) -> Result<AgentDefinition, BuildError> {
         Ok(AgentDefinition {
+            access: self.access,
+            budget: self.budget,
             instructions: self.instructions,
+            model: self.model,
             outcomes: self.outcomes,
             schema: self.schema.ok_or_else(|| BuildError::missing_field("schema"))?,
             setup: self.setup,

@@ -6,6 +6,7 @@ Full command reference for `sikaru`.
 
 - [`sikaru activation`](#sikaru-activation)
 - [`sikaru agent-budgets`](#sikaru-agent-budgets)
+- [`sikaru agent-documents`](#sikaru-agent-documents)
 - [`sikaru agent-imports`](#sikaru-agent-imports)
 - [`sikaru agents`](#sikaru-agents)
 - [`sikaru capability-ceilings`](#sikaru-capability-ceilings)
@@ -122,6 +123,181 @@ Setup Payment
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--harness-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru agent-documents`
+
+#### `sikaru agent-documents adopt-suggestion`
+
+Adopt Suggestion
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/document/suggestions/{suggestion_id}/adopt`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--suggestion-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-documents compare`
+
+Compare
+
+`GET /v1/projects/{project_id}/managed-agents/{agent_slug}/document/compare`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+
+#### `sikaru agent-documents discard`
+
+Discard Document
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/document/discard`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-documents dismiss-suggestion`
+
+Dismiss Suggestion
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/document/suggestions/{suggestion_id}/dismiss`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--suggestion-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+
+#### `sikaru agent-documents get`
+
+Get Document
+
+`GET /v1/projects/{project_id}/managed-agents/{agent_slug}/document`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+
+#### `sikaru agent-documents import-files`
+
+Import Document Files
+
+`POST /v1/projects/{project_id}/agent-documents/import`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-documents list-resources`
+
+Document Resources
+
+`GET /v1/projects/{project_id}/agent-documents/resources`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru agent-documents list-suggestions`
+
+Suggestions
+
+`GET /v1/projects/{project_id}/managed-agents/{agent_slug}/document/suggestions`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+
+#### `sikaru agent-documents list-templates`
+
+Document Templates
+
+`GET /v1/projects/{project_id}/agent-documents/templates`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru agent-documents list-versions`
+
+Versions
+
+`GET /v1/projects/{project_id}/managed-agents/{agent_slug}/document/versions`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+
+#### `sikaru agent-documents publish`
+
+Publish
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/document/publish`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-documents revert`
+
+Revert
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/document/revert`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-documents save`
+
+Save Document
+
+`PUT /v1/projects/{project_id}/managed-agents/{agent_slug}/document`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-documents snippets`
+
+Document Snippets
+
+`GET /v1/projects/{project_id}/managed-agents/{agent_slug}/document/snippets`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+
+#### `sikaru agent-documents validate`
+
+Validate Agent Document
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/document/validate`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---
@@ -652,43 +828,28 @@ Bounded queue snapshot. wait_seconds is a maximum; server may return immediately
 
 ### `sikaru compute-workspaces`
 
-#### `sikaru compute-workspaces commit-tree`
+#### `sikaru compute-workspaces record`
 
-Commit Workspace Tree
+Record a pushed commit as this session's workspace checkpoint. Idempotent on ``commit_sha``.
 
-`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-checkpoints/{run_id}/tree`
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-checkpoints`
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--attachment-id` | `string` | Yes |  |
-| `--run-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
-#### `sikaru compute-workspaces get`
+#### `sikaru compute-workspaces remote`
 
-Get Workspace Checkpoint
+Scoped git remote for this session's workspace branch. Request it again before ``expires_at``.
 
-`GET /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-checkpoints/{run_id}`
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--project-id` | `string` | Yes |  |
-| `--attachment-id` | `string` | Yes |  |
-| `--run-id` | `string` | Yes |  |
-
-#### `sikaru compute-workspaces put-blob`
-
-Put Workspace Blob
-
-`PUT /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-checkpoints/{run_id}/blobs/{sha256}`
+`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-remote`
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--attachment-id` | `string` | Yes |  |
-| `--run-id` | `string` | Yes |  |
-| `--sha256` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---
@@ -819,6 +980,20 @@ Grant
 | `--project-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
+#### `sikaru connections list-apps`
+
+Catalog Apps
+
+`GET /v1/projects/{project_id}/connections/catalog/apps`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--search` | `string` | No |  |
+| `--category` | `string` | No |  |
+| `--cursor` | `string` | No |  |
+| `--limit` | `integer` | No |  |
+
 #### `sikaru connections list-connections`
 
 List Connections
@@ -827,6 +1002,17 @@ List Connections
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections revoke`
+
+Revoke
+
+`POST /v1/projects/{project_id}/connections/{connection_id}/revoke`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
 | `--project-id` | `string` | Yes |  |
 
 #### `sikaru connections revoke-grant`
@@ -839,6 +1025,29 @@ Revoke Grant
 |------|------|----------|-------------|
 | `--connection-id` | `string` | Yes |  |
 | `--grant-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru connections update-connection`
+
+Update Connection
+
+`PATCH /v1/projects/{project_id}/connections/{connection_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru connections usage`
+
+Usage
+
+`GET /v1/projects/{project_id}/connections/{connection_id}/usage`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
 | `--project-id` | `string` | Yes |  |
 
 ---
@@ -2115,6 +2324,17 @@ omitted. No trajectory is synthesized when retained evidence is unavailable.
 | `--project-id` | `string` | Yes |  |
 | `--run-id` | `string` | Yes |  |
 
+#### `sikaru runs get-transcript`
+
+Managed Run Transcript
+
+`GET /v1/projects/{project_id}/runs/{run_id}/transcript`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--run-id` | `string` | Yes |  |
+
 #### `sikaru runs pending-actions`
 
 Pending Actions
@@ -2164,6 +2384,19 @@ can resume from their last delivered event without restarting the run.
 | `--project-id` | `string` | Yes |  |
 | `--run-id` | `string` | Yes |  |
 | `--after` | `string` | No |  |
+| `--last-event-id` | `string` | No |  |
+
+#### `sikaru runs stream-transcript-events`
+
+Managed Transcript Stream
+
+`GET /v1/projects/{project_id}/runs/{run_id}/transcript/events/stream`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--run-id` | `string` | Yes |  |
+| `--after` | `integer` | No |  |
 | `--last-event-id` | `string` | No |  |
 
 #### `sikaru runs submit-tool-result`

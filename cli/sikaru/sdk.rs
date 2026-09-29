@@ -63,6 +63,7 @@ pub fn client(ctx: &AppContext) -> sikaru_sdk::api::ApiClient {
     sikaru_sdk::api::ApiClient {
         config,
         activation: sikaru_sdk::api::ActivationClient { http_client: http_client.clone() },
+        agent_documents: sikaru_sdk::api::AgentDocumentsClient { http_client: http_client.clone() },
         agent_imports: sikaru_sdk::api::AgentImportsClient { http_client: http_client.clone() },
         agents: sikaru_sdk::api::AgentsClient { http_client: http_client.clone() },
         capability_ceilings: sikaru_sdk::api::CapabilityCeilingsClient { http_client: http_client.clone() },

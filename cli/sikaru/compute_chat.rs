@@ -96,6 +96,9 @@ fn turn_matches(m: &ArgMatches, resume: Option<&str>, text: &str) -> Result<ArgM
             m.get_one::<u64>(name).unwrap().to_string(),
         ]);
     }
+    if m.get_flag("no-workspace-checkpoints") {
+        args.push("--no-workspace-checkpoints".into());
+    }
     add_state(&mut args, m, resume);
     args.push(format!("--prompt={text}"));
     Ok(workflow::command().try_get_matches_from(args)?)
@@ -143,5 +146,30 @@ fn render_usage(result: &Value) {
             ""
         };
         eprintln!("Tokens{coverage}: {input} input ({cached} cached), {output} output.");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn follow_up_turns_keep_the_checkpoint_switch() {
+        let m = super::workflow::command()
+            .try_get_matches_from([
+                "exec",
+                "--project",
+                "p",
+                "--agent",
+                "a",
+                "--no-workspace-checkpoints",
+            ])
+            .unwrap();
+        let next = super::turn_matches(&m, Some("/state"), "next task").unwrap();
+        assert!(next.get_flag("no-workspace-checkpoints"));
+        let plain = super::workflow::command()
+            .try_get_matches_from(["exec", "--project", "p", "--agent", "a"])
+            .unwrap();
+        assert!(!super::turn_matches(&plain, None, "task")
+            .unwrap()
+            .get_flag("no-workspace-checkpoints"));
     }
 }

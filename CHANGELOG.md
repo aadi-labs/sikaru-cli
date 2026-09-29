@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.12
+
+- Author agents as Markdown documents: pull and push drafts, validate access, review changes, publish with a reviewed access digest, and retrieve usage snippets.
+- Use document revisions to detect conflicting edits and inspect published versions, comparisons, and suggested changes.
+- Discover connection apps, update connection settings, and inspect which agents use a connection.
+- Sign in for personal connections and resume conversations after connecting an account. Personal conversation content is visible only to its runner.
+- These features require an updated managed service.
+
+## 0.2.11
+
+- Save workspace checkpoints as git commits on the session's branch in one bounded upload when a run ends, instead of one request per file. A `run_finished` event reports the end of the run before the upload.
+- Checkpoints keep executable permissions and in-workspace symbolic links, apply the workspace's `.gitignore` files and default ignore rules, and start from the workspace repository's current commit.
+- Checkpoints are also saved when a run is stopped, interrupted or loses its lease; failures are reported on stderr without changing the result.
+- The persistent connection identifies the CLI with the same User-Agent as its other requests.
+- Remove the per-file workspace upload.
+- These features require an updated managed service.
+
 ## 0.2.10
 
 - Declare an agent's reach in typed `web`, `tools` and `setup` sections of its definition: web search provider and domain allow and block lists, built-in tool enablement and approval policies, and setup packages, commands and repositories.

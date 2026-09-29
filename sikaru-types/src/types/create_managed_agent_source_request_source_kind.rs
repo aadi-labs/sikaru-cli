@@ -5,6 +5,7 @@ use super::*;
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CreateManagedAgentSourceRequestSourceKind {
+    AgentDocument,
     WorkflowJson,
     Langgraph,
     N8NJson,
@@ -27,6 +28,7 @@ pub enum CreateManagedAgentSourceRequestSourceKind {
 impl Serialize for CreateManagedAgentSourceRequestSourceKind {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
+            Self::AgentDocument => serializer.serialize_str("agent_document"),
             Self::WorkflowJson => serializer.serialize_str("workflow_json"),
             Self::Langgraph => serializer.serialize_str("langgraph"),
             Self::N8NJson => serializer.serialize_str("n8n_json"),
@@ -50,6 +52,7 @@ impl<'de> Deserialize<'de> for CreateManagedAgentSourceRequestSourceKind {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = String::deserialize(deserializer)?;
         match value.as_str() {
+            "agent_document" => Ok(Self::AgentDocument),
             "workflow_json" => Ok(Self::WorkflowJson),
             "langgraph" => Ok(Self::Langgraph),
             "n8n_json" => Ok(Self::N8NJson),
@@ -72,6 +75,7 @@ impl<'de> Deserialize<'de> for CreateManagedAgentSourceRequestSourceKind {
 impl fmt::Display for CreateManagedAgentSourceRequestSourceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AgentDocument => write!(f, "agent_document"),
             Self::WorkflowJson => write!(f, "workflow_json"),
             Self::Langgraph => write!(f, "langgraph"),
             Self::N8NJson => write!(f, "n8n_json"),

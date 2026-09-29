@@ -26,3 +26,9 @@ Do not run anything that writes the index, working tree, refs, or remotes:
 back. The user commits, branches, and publishes. Subagent briefs must repeat
 this rule.
 
+
+## Native sources
+
+`cli/sikaru/custom.rs`, `cli/sikaru/compute*.rs` and the authored tests under `tests/`
+are staged from the private service repository. Edit them there and restage; a direct
+edit here is reported as drift by the client generation check.

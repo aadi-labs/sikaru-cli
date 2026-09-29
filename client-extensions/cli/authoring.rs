@@ -311,35 +311,16 @@ fn invoke(
     )
 }
 fn dev(matches: &ArgMatches, ctx: &AppContext) -> Result<(), CliError> {
-    let package = package(directory(matches))?;
-    let name = package["name"].as_str().unwrap();
-    let digest = package["contentDigest"].as_str().unwrap();
-    let slug = format!("{}-draft-{}", name, &digest[7..19]);
+    let slug = matches.get_one::<String>("agent").unwrap();
+    let revision = matches.get_one::<u64>("revision").unwrap();
     let project = matches.get_one::<String>("project").unwrap();
-    if matches
-        .try_get_one::<bool>("dry-run")
-        .ok()
-        .flatten()
-        .copied()
-        .unwrap_or(false)
-    {
-        println!(
-            "{}",
-            json!({"dryRun":true,"projectId":project,"agentSlug":slug,"status":"inactive",
-            "environment":"draft","source":package,"prompt":matches.get_one::<String>("prompt")})
-        );
+    let acknowledge = matches.get_flag("acknowledge-widening");
+    if matches.try_get_one::<bool>("dry-run").ok().flatten().copied().unwrap_or(false) {
+        println!("{}", json!({"dryRun":true,"projectId":project,"agentSlug":slug,
+            "environment":"draft","draftRevision":revision,"acknowledgeWidening":acknowledge,
+            "prompt":matches.get_one::<String>("prompt")}));
         return Ok(());
     }
-    let agent = invoke(
-        ctx,
-        "managed_agents",
-        "create_managed_agent",
-        json!({"project_id":project}),
-        json!({
-            "agentSlug":slug,"displayName":format!("{name} (draft)"),"status":"inactive",
-            "source":{"sourceKind":"source_bundle","definition":package["definition"],"contentDigest":digest}
-        }),
-    )?;
     eprintln!("Draft ready: {slug}");
     let session = invoke(
         ctx,
@@ -347,7 +328,8 @@ fn dev(matches: &ArgMatches, ctx: &AppContext) -> Result<(), CliError> {
         "create",
         json!({"project_id":project,"harness_id":slug}),
         json!({
-            "tenant_id":matches.get_one::<String>("tenant").unwrap(),"user_id":matches.get_one::<String>("user").unwrap(),"environment":"draft"
+            "tenant_id":matches.get_one::<String>("tenant").unwrap(),"user_id":matches.get_one::<String>("user").unwrap(),"environment":"draft",
+            "draft_revision":revision,"acknowledge_widening":acknowledge
         }),
     )?;
     let sid = session["session"]["id"]
@@ -367,7 +349,7 @@ fn dev(matches: &ArgMatches, ctx: &AppContext) -> Result<(), CliError> {
     } else {
         None
     };
-    println!("{}", json!({"agent":agent,"session":session,"turn":turn}));
+    println!("{}", json!({"agentSlug":slug,"draftRevision":revision,"session":session,"turn":turn}));
     Ok(())
 }
 pub fn install(app: CliApp) -> CliApp {
@@ -399,8 +381,10 @@ pub fn install(app: CliApp) -> CliApp {
     )
     .command(
         Command::new("dev")
-            .about("Create an immutable draft and a hosted draft session")
-            .arg(path())
+            .about("Test an existing agent at its saved document revision without changing Live")
+            .arg(Arg::new("agent").required(true))
+            .arg(Arg::new("revision").long("revision").required(true).value_parser(clap::value_parser!(u64)))
+            .arg(Arg::new("acknowledge-widening").long("acknowledge-widening").action(ArgAction::SetTrue))
             .arg(required("project"))
             .arg(required("tenant"))
             .arg(required("user"))

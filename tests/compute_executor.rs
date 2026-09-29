@@ -30,10 +30,13 @@ fn generated_api_commands_remain_available() {
 }
 
 #[cfg(unix)]
+#[path = "support/git_remote.rs"]
+mod git_remote;
+
+#[cfg(unix)]
 mod wire {
+    use super::git_remote::{self, Faults, GitRemote};
     use serde_json::{json, Value};
-    use sha2::{Digest, Sha256};
-    use std::collections::BTreeMap;
     use std::{
         process::Stdio,
         sync::{Arc, Mutex},
@@ -43,6 +46,12 @@ mod wire {
     use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
     #[derive(Default)]
     struct State {
+        remote_mints: usize,
+        records: Vec<Value>,
+        order: Vec<&'static str>,
+        lease_lost: bool,
+        record_attempts: usize,
+        reconcile_at_refusal: usize,
         ready: bool,
         stage: usize,
         handle: String,
@@ -55,20 +64,14 @@ mod wire {
         reconciliations: Vec<Value>,
         lost_issued: bool,
         ready_body: Option<Value>,
-        checkpoint_reads: usize,
-        tree_posts: usize,
-        tree: Option<Value>,
-        tree_id: Option<String>,
-        blobs: BTreeMap<String, Vec<u8>>,
-        blob_attempts: Vec<String>,
-        upload_resumed: bool,
-        checkpoint_events: Vec<&'static str>,
         http_receipts: usize,
+        http_user_agents: Vec<String>,
         channel: ChannelState,
     }
     /// What the fake gateway saw on its executor channel endpoint.
     #[derive(Default)]
     struct ChannelState {
+        user_agents: Vec<String>,
         connections: usize,
         refusals: usize,
         unauthorized: usize,
@@ -84,6 +87,7 @@ mod wire {
         state: Arc<Mutex<State>>,
         scenario: &'static str,
         effect: std::path::PathBuf,
+        git: Option<Arc<GitRemote>>,
     }
     fn attachment(status: &str, ttl: u64) -> Value {
         json!({"id":"attachment","session_id":"session","project_id":"project","environment_id":"environment","provider_id":"provider",
@@ -103,10 +107,24 @@ mod wire {
             );
             assert!(request.headers.get("api_key").is_none());
             let mut state = self.state.lock().unwrap();
+            state.http_user_agents.push(
+                request
+                    .headers
+                    .get("user-agent")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned(),
+            );
             let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
             let path = request.url.path();
             if let Some(response) = self.fault(&mut state, path, &body) {
                 return response;
+            }
+            if path.ends_with("/workspace-remote") {
+                return self.workspace_remote(&mut state);
+            }
+            if path.ends_with("/workspace-checkpoints") {
+                return self.record_checkpoint(&mut state, &body);
             }
             if path.ends_with("/work") {
                 return self.work(&mut state);
@@ -114,13 +132,61 @@ mod wire {
             if path.ends_with("/receipts") {
                 return self.receipt(&mut state, body);
             }
-            if path.contains("/workspace-checkpoints/") {
-                return self.checkpoint(&mut state, request, body);
-            }
             self.lifecycle(&mut state, path, body)
         }
     }
     impl Oracle {
+        fn record_checkpoint(&self, s: &mut State, body: &Value) -> ResponseTemplate {
+            s.record_attempts += 1;
+            s.order.push("record");
+            if self.scenario == "git_record_conflict" {
+                return ResponseTemplate::new(409)
+                    .set_body_json(json!({"detail":"turn_already_checkpointed"}));
+            }
+            if self.scenario == "git_not_quiescent" {
+                if s.record_attempts == 1 {
+                    s.reconcile_at_refusal = s.reconciliations.len();
+                    return ResponseTemplate::new(409)
+                        .set_body_json(json!({"detail":"workspace_not_quiescent"}));
+                }
+                assert!(
+                    s.reconciliations.len() > s.reconcile_at_refusal,
+                    "fresh reconciliation before retry"
+                );
+                let observations = s.reconciliations.last().unwrap()["processes"]
+                    .as_array()
+                    .unwrap();
+                assert_eq!(observations.len(), 1);
+                assert_eq!(observations[0]["handle_id"], s.handle);
+                assert_eq!(observations[0]["status"], "exited");
+            }
+            s.records.push(body.clone());
+            ok(
+                json!({"commit_sha":body["commit_sha"],"branch":git_remote::BRANCH,"recorded_at":"2026-09-29T00:00:00Z"}),
+            )
+        }
+        fn workspace_remote(&self, s: &mut State) -> ResponseTemplate {
+            let Some(git) = &self.git else {
+                return ResponseTemplate::new(404);
+            };
+            if s.lease_lost {
+                // Minting needs a valid lease.
+                return ResponseTemplate::new(409).set_body_json(json!({"detail":"lease_expired"}));
+            }
+            s.remote_mints += 1;
+            let lifetime = if self.scenario == "git_token_near_expiry" && s.remote_mints == 1 {
+                10
+            } else {
+                900
+            };
+            ok(
+                json!({"remote_url":git.url(),"username":"x-token","token":format!("token-{}",s.remote_mints),
+                "branch":git_remote::BRANCH,"head_sha":git.head(),"ignore_defaults":git_remote::IGNORE_DEFAULTS,
+                "expires_at":git_remote::rfc3339(git_remote::unix_now()+lifetime),
+                "max_push_bytes":if self.scenario == "git_split" {200_000} else {100_000_000}}),
+            )
+        }
+
         fn fault(&self, s: &mut State, path: &str, body: &Value) -> Option<ResponseTemplate> {
             if self.credential_revoked() {
                 return Some(ResponseTemplate::new(401));
@@ -155,10 +221,8 @@ mod wire {
             self.scenario == "revoked" && self.effect.with_file_name("started").exists()
         }
         fn lifecycle(&self, s: &mut State, path: &str, body: Value) -> ResponseTemplate {
-            let mut a = attachment("ready", if self.scenario == "expiry" { 1 } else { 3 });
-            if self.scenario == "checkpoint_restart" && s.upload_resumed {
-                a["owner_epoch"] = json!(2);
-            }
+            let expiring = matches!(self.scenario, "expiry" | "git_lease_lost");
+            let a = attachment("ready", if expiring { 1 } else { 3 });
             if path.ends_with("/ready") {
                 s.ready = true;
                 s.ready_body = Some(body);
@@ -172,7 +236,8 @@ mod wire {
             }
             if path.ends_with("/heartbeat") {
                 s.heartbeat += 1;
-                if self.scenario == "expiry" {
+                if expiring {
+                    s.lease_lost = true;
                     return ResponseTemplate::new(503)
                         .set_body_json(json!({"detail":"restricted-executor-secret"}));
                 }
@@ -187,6 +252,7 @@ mod wire {
                 return ok(json!({"attachment":a,"receipts":[]}));
             }
             if path.ends_with("/cleanup") {
+                s.order.push("cleanup");
                 s.cleanup = Some(body);
                 return ok(attachment("cleaned", 3));
             }
@@ -223,8 +289,9 @@ mod wire {
         fn work(&self, s: &mut State) -> ResponseTemplate {
             s.polls += 1;
             let mut page = self.advertised_page(s);
-            if self.scenario == "checkpoint_restart" && s.upload_resumed {
-                page["attachment"]["owner_epoch"] = json!(2);
+            if self.scenario == "git_not_quiescent" && !s.handle.is_empty() {
+                page["live_handles"] =
+                    json!([{"handle_id":s.handle,"run_id":"run","tool_call_id":"start"}]);
             }
             if !s.ready {
                 if s.lost_issued {
@@ -240,7 +307,7 @@ mod wire {
                 return ok(page).set_delay(Duration::from_secs(2));
             }
             if s.stage >= self.final_stage() {
-                return self.completed_work(s, page);
+                return self.completed_work(page);
             }
             if self.withholds_operation(s) {
                 return ok(page);
@@ -249,110 +316,10 @@ mod wire {
             page["operations"] = json!([op]);
             ok(page)
         }
-        fn completed_work(&self, s: &mut State, mut page: Value) -> ResponseTemplate {
-            if self.scenario.starts_with("checkpoint") {
-                return self.checkpoint_page(s, page);
-            }
+        fn completed_work(&self, mut page: Value) -> ResponseTemplate {
             page["execution"]["terminal"] = json!(true);
             page["execution"]["status"] = json!("completed");
             ok(page)
-        }
-        fn checkpoint_view(&self, s: &State) -> Value {
-            json!({"checkpoint_id":"capture-one","run_id":"run",
-                "workspace_generation":"generation","owner_epoch":if self.scenario == "checkpoint_restart" && s.upload_resumed {2} else {1},
-                "status":if s.tree.is_some() {"published"} else {"requested"},
-                "tree_id":s.tree_id})
-        }
-        fn checkpoint_page(&self, s: &mut State, mut page: Value) -> ResponseTemplate {
-            page["execution"]["status"] = json!("completed");
-            if s.tree.is_some() && s.checkpoint_events.last() == Some(&"ack") {
-                s.checkpoint_events.push("terminal");
-                page["execution_phase"] = json!("terminal");
-                page["execution"]["terminal"] = json!(true);
-            } else {
-                page["execution_phase"] = json!("checkpointing");
-                page["workspace_checkpoint"] = self.checkpoint_view(s);
-                if self.scenario == "checkpoint_generation" {
-                    page["workspace_checkpoint"]["workspace_generation"] = json!("replacement");
-                }
-            }
-            ok(page)
-        }
-        fn checkpoint(&self, s: &mut State, request: &Request, body: Value) -> ResponseTemplate {
-            let path = request.url.path();
-            assert!(path.contains("/workspace-checkpoints/run"));
-            if path.contains("/blobs/") {
-                assert_eq!(request.method.as_str(), "PUT");
-                assert!(request.body.len() <= 1_000_000);
-                let hash = path.rsplit('/').next().unwrap();
-                assert_eq!(hash, format!("{:x}", Sha256::digest(&request.body)));
-                s.blob_attempts.push(hash.to_owned());
-                if (self.scenario == "checkpoint_retry" && s.blob_attempts.len() == 3)
-                    || (self.scenario == "checkpoint_restart"
-                        && s.blobs.len() == 2
-                        && !s.upload_resumed)
-                {
-                    std::fs::write(
-                        self.effect.with_file_name("result.txt"),
-                        "changed during retry",
-                    )
-                    .unwrap();
-                    return ResponseTemplate::new(503);
-                }
-                s.blobs.insert(hash.into(), request.body.clone());
-                s.checkpoint_events.push("blob");
-                let receipt = match self.scenario {
-                    "checkpoint_wrong_hash" => {
-                        ok(json!({"sha256":"0".repeat(64),"size":request.body.len()}))
-                    }
-                    "checkpoint_wrong_size" => {
-                        ok(json!({"sha256":hash,"size":request.body.len()+1}))
-                    }
-                    _ => ok(json!({"sha256":hash,"size":request.body.len()})),
-                };
-                if self.scenario == "checkpoint_slow_upload" {
-                    // Outlasts the heartbeat interval so a renewal lands mid-upload.
-                    return receipt.set_delay(Duration::from_millis(1500));
-                }
-                return receipt;
-            }
-            if path.ends_with("/tree") {
-                return self.commit_tree(s, body);
-            }
-            assert_eq!(request.method.as_str(), "GET");
-            s.checkpoint_reads += 1;
-            s.checkpoint_events
-                .push(if s.tree.is_some() { "ack" } else { "read" });
-            ok(self.checkpoint_view(s))
-        }
-        fn commit_tree(&self, s: &mut State, body: Value) -> ResponseTemplate {
-            s.tree_posts += 1;
-            assert_eq!(s.tree_posts, 1, "uncertain commit must use status lookup");
-            let files = body["files"].as_object().unwrap();
-            assert_eq!(files.len(), 3);
-            for file in files.values() {
-                let mut bytes = Vec::new();
-                for chunk in file["chunks"].as_array().unwrap() {
-                    let data = &s.blobs[chunk["sha256"].as_str().unwrap()];
-                    assert_eq!(data.len() as u64, chunk["size"].as_u64().unwrap());
-                    bytes.extend(data);
-                }
-                assert_eq!(file["sha256"], format!("{:x}", Sha256::digest(&bytes)));
-                assert_eq!(file["size"], bytes.len());
-            }
-            s.tree_id = Some(canonical_tree_id(&body));
-            s.tree = Some(body);
-            s.checkpoint_events.push("commit");
-            if self.scenario == "checkpoint_lost" {
-                std::fs::write(
-                    self.effect.with_file_name("result.txt"),
-                    "changed after commit",
-                )
-                .unwrap();
-                return ResponseTemplate::new(503);
-            }
-            s.checkpoint_events.push("ack");
-            ok(self.checkpoint_view(s))
         }
         fn next(&self, s: &State) -> Value {
             if self.scenario == "altered" && s.stage == 1 {
@@ -360,7 +327,8 @@ mod wire {
             }
             if s.stage == 0 {
                 let command=match self.scenario {
-                    "credential_outage"|"renew_denied"|"credential_expiry"|"expiry"|"signal"|"revoked"=>"touch started; sleep 2; touch escaped",
+                    "credential_outage"|"renew_denied"|"credential_expiry"|"expiry"|"signal"|"revoked"|"git_lease_lost"=>"touch started; sleep 2; touch escaped",
+                    "git_force_added"=>"mkdir -p .venv && echo pkg > .venv/pkg.py && git add -f .venv/pkg.py && git -c user.name=agent -c user.email=agent@example.com commit -qm agent && echo once >> effect; head -c 65536 /dev/zero",
                     "renew_retry"=>"sleep 4; echo once >> effect; head -c 65536 /dev/zero",
                     _=>"echo once >> effect; printf '%s' \"${SIKARU_API_KEY-unset}\" > env; head -c 65536 /dev/zero",
                 };
@@ -410,50 +378,64 @@ mod wire {
     fn running_page() -> Value {
         json!({"attachment":attachment("ready",3),"execution_phase":"running","execution":{"run_id":"run","status":"running","terminal":false,"approval_required":false},"operations":[],"issued_operations":[],"live_handles":[]})
     }
-    fn canonical_tree_id(tree: &Value) -> String {
-        // The public manifest contract specifies field order independent of JSON map order.
-        let mut entries = Vec::new();
-        for (path, file) in tree["files"].as_object().unwrap() {
-            let chunks = file["chunks"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|chunk| {
-                    format!(
-                        "{{\"sha256\":{},\"size\":{}}}",
-                        chunk["sha256"], chunk["size"]
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            entries.push(format!(
-                "{}:{{\"sha256\":{},\"size\":{},\"mode\":{},\"chunks\":[{}]}}",
-                serde_json::to_string(path).unwrap(),
-                file["sha256"],
-                file["size"],
-                file["mode"],
-                chunks
-            ));
-        }
-        format!(
-            "{:x}",
-            Sha256::digest(format!("{{\"files\":{{{}}}}}", entries.join(",")))
-        )
-    }
     fn ok(value: Value) -> ResponseTemplate {
         ResponseTemplate::new(200).set_body_json(value)
     }
-    async fn launch(
-        scenario: &'static str,
-    ) -> (tempfile::TempDir, MockServer, Oracle, tokio::process::Child) {
+    struct Launch {
+        root: tempfile::TempDir,
+        path: std::path::PathBuf,
+        server: MockServer,
+        oracle: Oracle,
+        base_url: String,
+    }
+    fn git_faults(scenario: &str) -> Faults {
+        match scenario {
+            "git_token_expiry" => Faults {
+                refuse_first_token: true,
+                ..Faults::default()
+            },
+            "git_stale" => Faults {
+                race_first_push: true,
+                ..Faults::default()
+            },
+            "git_slow_push" => Faults {
+                push_delay: Some(Duration::from_secs(20)),
+                ..Faults::default()
+            },
+            _ => Faults::default(),
+        }
+    }
+    fn prepare_workspace(scenario: &str, ws: &std::path::Path) {
+        match scenario {
+            "git_task_repo" | "git_force_added" => git_remote::task_repository(ws),
+            "git_split" => {
+                for i in 0..6u8 {
+                    std::fs::write(
+                        ws.join(format!("part-{i}.bin")),
+                        git_remote::noise(60_000, i),
+                    )
+                    .unwrap();
+                }
+                std::fs::write(ws.join("huge.bin"), git_remote::noise(300_000, 99)).unwrap();
+            }
+            _ => {}
+        }
+    }
+    async fn prepare_launch(scenario: &'static str) -> Launch {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().canonicalize().unwrap();
         std::fs::create_dir(path.join("workspace")).unwrap();
+        prepare_workspace(scenario, &path.join("workspace"));
+        let git = match scenario.starts_with("git_") {
+            true => Some(Arc::new(GitRemote::start(git_faults(scenario)).await)),
+            false => None,
+        };
         let server = MockServer::start().await;
         let oracle = Oracle {
             state: Default::default(),
             scenario,
             effect: path.join("workspace/effect"),
+            git,
         };
         Mock::given(wiremock::matchers::any())
             .respond_with(oracle.clone())
@@ -464,15 +446,353 @@ mod wire {
         } else {
             server.uri()
         };
-        let command_timeout = if scenario == "channel_long" { 60 } else { 10 };
-        let child = spawn_executor(&path, &base_url, command_timeout, 1).await;
-        (root, server, oracle, child)
+        Launch {
+            root,
+            path,
+            server,
+            oracle,
+            base_url,
+        }
+    }
+    async fn start(l: &Launch) -> tokio::process::Child {
+        let command_timeout = if l.oracle.scenario == "channel_long" {
+            60
+        } else {
+            10
+        };
+        spawn_executor(&l.path, &l.base_url, command_timeout, 1).await
+    }
+    async fn launch(
+        scenario: &'static str,
+    ) -> (tempfile::TempDir, MockServer, Oracle, tokio::process::Child) {
+        let l = prepare_launch(scenario).await;
+        let child = start(&l).await;
+        (l.root, l.server, l.oracle, child)
+    }
+    fn lifecycle_events(output: &std::process::Output) -> Vec<Value> {
+        git_remote::json_events(&output.stderr)
+            .into_iter()
+            .filter(|e| {
+                e["event"].as_str().is_some_and(|n| {
+                    (n.starts_with("checkpoint_") && n != "checkpoint_progress")
+                        || n == "run_finished"
+                })
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn quiescence_refusal_reconciles_real_terminal_process_state_before_one_retry() {
+        let l = prepare_launch("git_not_quiescent").await;
+        let output = result(start(&l).await).await;
+        completed(&output);
+        let state = l.oracle.state.lock().unwrap();
+        assert_eq!(state.record_attempts, 2);
+        assert_eq!(state.records.len(), 1);
+        assert_eq!(state.reconciliations.len(), state.reconcile_at_refusal + 1);
+        assert_eq!(state.order, vec!["record", "record", "cleanup"]);
+        assert!(l.oracle.git.as_ref().unwrap().head().is_some());
+    }
+    #[tokio::test]
+    async fn git_checkpoint_pushes_the_working_tree_without_touching_the_task_repository() {
+        let l = prepare_launch("git_task_repo").await;
+        let ws = l.path.join("workspace");
+        let seed = git_remote::text(git_remote::git(&ws, &["rev-parse", "HEAD"]));
+        let before = git_remote::snapshot(&ws.join(".git"));
+        let output = result(start(&l).await).await;
+        completed(&output);
+        assert_eq!(
+            git_remote::snapshot(&ws.join(".git")),
+            before,
+            "the task repository is read-only"
+        );
+        assert_eq!(
+            git_remote::git(&ws, &["diff", "--cached", "--name-only"]),
+            b"staged.txt\n"
+        );
+        let git = l.oracle.git.as_ref().unwrap();
+        let head = git.head().expect("one checkpoint pushed");
+        let events = lifecycle_events(&output);
+        let names: Vec<_> = events
+            .iter()
+            .map(|e| e["event"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["run_finished", "checkpoint_started", "checkpoint_pushed"]
+        );
+        assert_eq!(events[2]["commit_sha"], head);
+        assert_eq!(
+            events[2]["skipped"]["link_outside_workspace"], 2,
+            "escaping links are skipped, not fatal"
+        );
+        assert_eq!(
+            git.parents(&head),
+            vec![seed],
+            "the session branch starts from the task HEAD"
+        );
+        let tree: std::collections::BTreeMap<_, _> = git
+            .tree(&head)
+            .into_iter()
+            .map(|(mode, path)| (path, mode))
+            .collect();
+        assert_eq!(git.read(&head, "tracked.txt"), b"working copy");
+        assert_eq!(git.read(&head, "result.txt"), b"finished");
+        assert_eq!(tree["alias"], "120000");
+        assert_eq!(tree["run.sh"], "100755");
+        for absent in [
+            "app.log",
+            ".venv/lib/site.py",
+            "node_modules/left-pad/index.js",
+            "escape",
+            "absolute",
+        ] {
+            assert!(!tree.contains_key(absent), "{absent}");
+        }
+        assert!(tree.values().all(|mode| mode != "160000"));
+        let s = l.oracle.state.lock().unwrap();
+        assert_eq!(s.records.len(), 1);
+        assert_eq!(s.records[0]["commit_sha"], head);
+        assert_eq!(s.records[0]["trigger"], "turn");
+        assert_eq!(s.records[0]["run_id"], "run", "the completed run");
+        assert_eq!(
+            s.order,
+            vec!["record", "cleanup"],
+            "recorded under the lease, before cleanup"
+        );
+    }
+    #[tokio::test]
+    async fn force_added_ignored_paths_never_reach_any_pushed_commit() {
+        let l = prepare_launch("git_force_added").await;
+        let output = result(start(&l).await).await;
+        completed(&output);
+        let ws = l.path.join("workspace");
+        let agent_commit = git_remote::text(git_remote::git(&ws, &["rev-parse", "HEAD"]));
+        let git = l.oracle.git.as_ref().unwrap();
+        let reachable = git.reachable();
+        assert!(
+            !reachable.contains(&agent_commit),
+            "agent commits are not pushed as history"
+        );
+        for commit in &reachable {
+            assert!(
+                git.tree(commit)
+                    .iter()
+                    .all(|(_, path)| !path.starts_with(".venv/")),
+                "{commit}"
+            );
+        }
+        let head = git.head().unwrap();
+        assert!(git
+            .tree(&head)
+            .iter()
+            .all(|(_, path)| !path.starts_with("node_modules/")));
+    }
+    #[tokio::test]
+    async fn large_first_push_is_split_into_single_commit_pushes() {
+        let l = prepare_launch("git_split").await;
+        let output = result(start(&l).await).await;
+        completed(&output);
+        let git = l.oracle.git.as_ref().unwrap();
+        let seen = git.seen.lock().unwrap();
+        let accepted: Vec<_> = seen.pushes.iter().filter(|p| p.accepted).collect();
+        assert!(accepted.len() >= 2, "{}", accepted.len());
+        assert_eq!(
+            accepted.len(),
+            seen.pushes.len(),
+            "the service accepts every single-commit push"
+        );
+        assert!(
+            seen.pushes.iter().all(|p| p.body_bytes <= 200_000),
+            "{:?}",
+            seen.pushes.iter().map(|p| p.body_bytes).collect::<Vec<_>>()
+        );
+        for pair in accepted.windows(2) {
+            assert_eq!(
+                pair[1].old, pair[0].new,
+                "each push adds one commit on the previous head"
+            );
+            assert_eq!(git.parents(&pair[1].new), vec![pair[0].new.clone()]);
+        }
+        assert_eq!(accepted[0].old, git_remote::ZERO);
+        let head = git.head().unwrap();
+        let tree: Vec<_> = git.tree(&head).into_iter().map(|(_, p)| p).collect();
+        assert_eq!(tree.iter().filter(|p| p.starts_with("part-")).count(), 6);
+        assert!(!tree.contains(&"huge.bin".to_owned()));
+        let pushed = lifecycle_events(&output)
+            .into_iter()
+            .find(|e| e["event"] == "checkpoint_pushed")
+            .unwrap();
+        assert_eq!(pushed["skipped"]["too_large"], 1);
+        let s = l.oracle.state.lock().unwrap();
+        assert_eq!(s.records.len(), 1, "only the final head is recorded");
+        assert_eq!(s.records[0]["commit_sha"], head);
+    }
+    #[tokio::test]
+    async fn moved_head_is_reparented_without_force() {
+        let l = prepare_launch("git_stale").await;
+        let output = result(start(&l).await).await;
+        completed(&output);
+        let git = l.oracle.git.as_ref().unwrap();
+        let seen = git.seen.lock().unwrap();
+        assert_eq!(seen.pushes.len(), 2);
+        assert!(!seen.pushes[0].accepted && seen.pushes[1].accepted);
+        let head = git.head().unwrap();
+        assert_eq!(git.parents(&head), vec![seen.pushes[1].old.clone()]);
+        assert!(
+            git.tree(&head).iter().all(|(_, p)| p != "other.txt"),
+            "the workspace state wins"
+        );
+        assert_eq!(
+            l.oracle.state.lock().unwrap().records[0]["commit_sha"],
+            head
+        );
+    }
+    #[tokio::test]
+    async fn expired_token_is_reminted_and_the_push_retried() {
+        let l = prepare_launch("git_token_expiry").await;
+        completed(&result(start(&l).await).await);
+        let git = l.oracle.git.as_ref().unwrap();
+        let seen = git.seen.lock().unwrap();
+        assert_eq!(seen.unauthorized, 1);
+        assert_eq!(
+            seen.pushes
+                .iter()
+                .filter(|p| p.accepted)
+                .map(|p| p.token.as_str())
+                .collect::<Vec<_>>(),
+            vec!["token-2"]
+        );
+        let s = l.oracle.state.lock().unwrap();
+        assert_eq!((s.remote_mints, s.records.len()), (2, 1));
+    }
+    #[tokio::test]
+    async fn token_close_to_expiry_is_reminted_before_pushing() {
+        let l = prepare_launch("git_token_near_expiry").await;
+        completed(&result(start(&l).await).await);
+        let git = l.oracle.git.as_ref().unwrap();
+        let seen = git.seen.lock().unwrap();
+        assert_eq!(seen.unauthorized, 0);
+        assert!(seen.pushes.iter().all(|p| p.token == "token-2"));
+        assert_eq!(
+            l.oracle.state.lock().unwrap().remote_mints,
+            2,
+            "one re-mint before the push, no keeper spin"
+        );
+    }
+    #[tokio::test]
+    async fn lease_loss_pushes_with_the_token_already_held() {
+        let l = prepare_launch("git_lease_lost").await;
+        let output = result(start(&l).await).await;
+        assert_eq!(
+            output.status.code(),
+            Some(4),
+            "lease loss still requires recovery"
+        );
+        let git = l.oracle.git.as_ref().unwrap();
+        assert!(
+            git.head().is_some(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let s = l.oracle.state.lock().unwrap();
+        assert_eq!(
+            s.remote_mints, 1,
+            "minted while the lease was valid, never after"
+        );
+        assert_eq!(s.records[0]["trigger"], "lease_lost");
+    }
+    #[tokio::test]
+    async fn a_refused_record_is_reported_without_changing_the_result() {
+        let l = prepare_launch("git_record_conflict").await;
+        let output = result(start(&l).await).await;
+        completed(&output);
+        let failed = lifecycle_events(&output)
+            .into_iter()
+            .find(|e| e["event"] == "checkpoint_failed")
+            .expect("failure reported");
+        assert_eq!(failed["reason"], "turn_already_checkpointed");
+    }
+    #[tokio::test]
+    async fn sigterm_during_a_checkpoint_push_reports_failure_and_exits_promptly() {
+        let l = prepare_launch("git_slow_push").await;
+        let child = start(&l).await;
+        let git = l.oracle.git.clone().unwrap();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while git.seen.lock().unwrap().pushes_started == 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let signalled = std::time::Instant::now();
+        unsafe {
+            libc::kill(child.id().unwrap() as i32, libc::SIGTERM);
+        }
+        let output = tokio::time::timeout(Duration::from_secs(15), child.wait_with_output())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            signalled.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            signalled.elapsed()
+        );
+        completed(&output);
+        assert!(
+            output.status.success(),
+            "a failed checkpoint keeps the result's exit status"
+        );
+        let failed = lifecycle_events(&output)
+            .into_iter()
+            .find(|e| e["event"] == "checkpoint_failed")
+            .expect("failure reported");
+        assert_eq!(failed["reason"], "signal");
+        let s = l.oracle.state.lock().unwrap();
+        assert!(s.records.is_empty());
+        assert!(
+            s.heartbeat >= 2,
+            "lease keeps renewing during the slow checkpoint"
+        );
+        assert!(
+            s.cleanup.is_some(),
+            "cleanup still runs after an interrupted checkpoint"
+        );
+    }
+    #[tokio::test]
+    async fn serve_hidden_flag_skips_checkpoint_remote_and_private_repository() {
+        let l = prepare_launch("git_task_repo").await;
+        let child =
+            spawn_executor_with_args(&l.path, &l.base_url, 10, 1, &["--no-workspace-checkpoints"])
+                .await;
+        let output = result(child).await;
+        completed(&output);
+        assert_eq!(
+            lifecycle_events(&output),
+            vec![json!({"event":"checkpoint_skipped","reason":"disabled"})]
+        );
+        let state = l.oracle.state.lock().unwrap();
+        assert_eq!((state.remote_mints, state.records.len()), (0, 0));
+        assert!(state.cleanup.is_some());
+        assert!(!l.path.join("state/workspace.git").exists());
+        let git = l.oracle.git.as_ref().unwrap();
+        assert!(git.head().is_none());
+        assert_eq!(git.seen.lock().unwrap().pushes_started, 0);
     }
     async fn spawn_executor(
         path: &std::path::Path,
         base_url: &str,
         command_timeout: u64,
         owner_epoch: i64,
+    ) -> tokio::process::Child {
+        spawn_executor_with_args(path, base_url, command_timeout, owner_epoch, &[]).await
+    }
+    async fn spawn_executor_with_args(
+        path: &std::path::Path,
+        base_url: &str,
+        command_timeout: u64,
+        owner_epoch: i64,
+        extra: &[&str],
     ) -> tokio::process::Child {
         let bootstrap = json!({"project_id":"project","session_id":"session","attachment_id":"attachment","owner_epoch":owner_epoch,"workspace_generation":"generation","journal_id":"journal","credential_id":"credential",
             "token":"restricted-executor-secret","workspace_provenance":{"kind":"existing_directory","identity":"original"},"workspace":path.join("workspace"),"state_dir":path.join("state"),"command_timeout_seconds":command_timeout});
@@ -488,6 +808,7 @@ mod wire {
             "--base-url",
             base_url,
         ])
+        .args(extra)
         .env("SIKARU_API_KEY", "controller-secret")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -537,6 +858,10 @@ mod wire {
         if let Ok(path) = std::env::var("U6_NATIVE_RECEIPTS") {
             std::fs::write(path, serde_json::to_vec(&state.receipts).unwrap()).unwrap();
         }
+        let capabilities = state.ready_body.as_ref().unwrap()["capabilities"]
+            .as_array()
+            .unwrap();
+        assert!(!capabilities.contains(&json!("filesystem-checkpoint-v1")));
         let read = &state.receipts[2]["payload"];
         assert_eq!(read["output"].as_str().unwrap(), "\0".repeat(24576));
         assert_eq!(read["next_offset"], 24576);
@@ -554,188 +879,6 @@ mod wire {
             assert!(!String::from_utf8_lossy(&output.stderr).contains(secret));
             assert!(!journal.contains(secret));
         }
-    }
-    #[tokio::test]
-    async fn workspace_checkpoint_is_acknowledged_before_terminal_completion() {
-        let (_root, _server, oracle, child) = launch("checkpoint").await;
-        let output = result(child).await;
-        assert!(
-            output.status.success(),
-            "{} {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let state = oracle.state.lock().unwrap();
-        assert!(state.ready_body.as_ref().unwrap()["capabilities"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("filesystem-checkpoint-v1")));
-        assert_eq!(state.receipts.len(), 4);
-        assert_eq!(state.tree_posts, 1);
-        assert_eq!(
-            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
-            &["commit", "ack", "terminal"]
-        );
-        assert_eq!(
-            state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
-            format!("{:x}", Sha256::digest(b"finished"))
-        );
-    }
-    #[tokio::test]
-    async fn workspace_checkpoint_retry_uploads_only_unacknowledged_blobs() {
-        let (_root, _server, oracle, child) = launch("checkpoint_retry").await;
-        let output = result(child).await;
-        assert!(
-            output.status.success(),
-            "stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let state = oracle.state.lock().unwrap();
-        assert_eq!(state.blobs.len(), 3);
-        assert_eq!(
-            state.blob_attempts.len(),
-            4,
-            "confirmed uploads must not repeat"
-        );
-        assert_eq!(state.blob_attempts[2], state.blob_attempts[3]);
-        assert_eq!(
-            state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
-            format!("{:x}", Sha256::digest(b"finished"))
-        );
-        assert_eq!(
-            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
-            &["commit", "ack", "terminal"]
-        );
-    }
-    #[tokio::test]
-    async fn workspace_checkpoint_new_owner_revalidates_blobs_without_recapturing_files() {
-        let (root, server, oracle, mut child) = launch("checkpoint_restart").await;
-        tokio::time::timeout(Duration::from_secs(20), async {
-            while oracle.state.lock().unwrap().blob_attempts.len() < 3 {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap();
-        child.kill().await.unwrap();
-        child.wait().await.unwrap();
-        let attempted_before = {
-            let mut state = oracle.state.lock().unwrap();
-            assert_eq!(state.tree_posts, 0);
-            assert!(!state.checkpoint_events.contains(&"terminal"));
-            state.upload_resumed = true;
-            state.blob_attempts.clone()
-        };
-        let child =
-            spawn_executor(&root.path().canonicalize().unwrap(), &server.uri(), 10, 2).await;
-        let output = result(child).await;
-        assert!(
-            output.status.success(),
-            "stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let state = oracle.state.lock().unwrap();
-        assert_eq!(
-            &state.blob_attempts[attempted_before.len()..],
-            &attempted_before[..3],
-            "new authority must not reuse old acknowledgments"
-        );
-        assert_eq!(state.receipts.len(), 4, "commands must not execute twice");
-        assert_eq!(
-            state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
-            format!("{:x}", Sha256::digest(b"finished"))
-        );
-        assert_eq!(
-            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
-            &["commit", "ack", "terminal"]
-        );
-    }
-    #[tokio::test]
-    async fn workspace_checkpoint_rejects_mismatched_blob_receipts() {
-        for scenario in ["checkpoint_wrong_hash", "checkpoint_wrong_size"] {
-            let (root, _server, oracle, child) = launch(scenario).await;
-            let output = result(child).await;
-            assert_eq!(output.status.code(), Some(4));
-            let state = oracle.state.lock().unwrap();
-            assert_eq!(state.blob_attempts.len(), 1);
-            assert_eq!(state.tree_posts, 0);
-            assert!(!state.checkpoint_events.contains(&"terminal"));
-            let staging = std::fs::read_dir(root.path().join("state"))
-                .unwrap()
-                .map(|entry| entry.unwrap().path())
-                .find(|path| {
-                    path.file_name()
-                        .unwrap()
-                        .to_string_lossy()
-                        .starts_with("workspace-")
-                })
-                .unwrap();
-            assert!(!std::fs::read_dir(staging).unwrap().any(|entry| entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .starts_with("ack-")));
-        }
-    }
-    #[tokio::test]
-    async fn workspace_lost_commit_ack_recovers_same_capture_without_reexecution() {
-        let (root, _server, oracle, child) = launch("checkpoint_lost").await;
-        let output = result(child).await;
-        assert!(
-            output.status.success(),
-            "{} {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
-            "once\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(root.path().join("workspace/result.txt")).unwrap(),
-            "changed after commit"
-        );
-        let state = oracle.state.lock().unwrap();
-        assert_eq!(state.tree_posts, 1);
-        assert!(state.checkpoint_reads >= 2);
-        assert_eq!(state.receipts.len(), 4);
-        assert_eq!(
-            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
-            &["commit", "ack", "terminal"]
-        );
-        assert_eq!(
-            state.tree.as_ref().unwrap()["files"]["result.txt"]["sha256"],
-            format!("{:x}", Sha256::digest(b"finished"))
-        );
-    }
-    #[tokio::test]
-    async fn lease_renewal_during_checkpoint_upload_does_not_deadlock_executor() {
-        let (_root, _server, oracle, child) = launch("checkpoint_slow_upload").await;
-        let output = result(child).await;
-        assert!(
-            output.status.success(),
-            "{} {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let state = oracle.state.lock().unwrap();
-        assert_eq!(
-            &state.checkpoint_events[state.checkpoint_events.len() - 3..],
-            &["commit", "ack", "terminal"]
-        );
-    }
-    #[tokio::test]
-    async fn workspace_checkpoint_wrong_generation_cannot_capture_files() {
-        let (_root, _server, oracle, child) = launch("checkpoint_generation").await;
-        let output = result(child).await;
-        assert_eq!(output.status.code(), Some(4));
-        let state = oracle.state.lock().unwrap();
-        assert_eq!(state.receipts.len(), 4);
-        assert_eq!(state.checkpoint_reads, 0);
-        assert!(state.blobs.is_empty());
-        assert!(state.tree.is_none());
     }
     #[tokio::test]
     async fn heartbeat_continues_while_poll_is_slow() {
@@ -975,6 +1118,14 @@ mod wire {
             let refuse = oracle.scenario == "channel_refused";
             let check = move |request: &Upgrade, accept: Accept| -> Result<Accept, ErrorResponse> {
                 let mut s = state.lock().unwrap();
+                s.channel.user_agents.push(
+                    request
+                        .headers()
+                        .get("user-agent")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default()
+                        .to_owned(),
+                );
                 let bearer = request
                     .headers()
                     .get("authorization")
@@ -1175,6 +1326,22 @@ mod wire {
         );
         assert_eq!(value["cleanup"], "confirmed", "{value}");
         value
+    }
+    #[tokio::test]
+    async fn channel_upgrade_sends_the_same_user_agent_as_http_requests() {
+        let (_root, _server, oracle, child) = launch("channel").await;
+        completed(&result(child).await);
+        let s = oracle.state.lock().unwrap();
+        let http: std::collections::BTreeSet<_> = s.http_user_agents.iter().cloned().collect();
+        assert_eq!(http.len(), 1, "{http:?}");
+        let expected = http.iter().next().unwrap();
+        assert!(expected.starts_with("sikaru-cli/"), "{expected}");
+        assert!(!s.channel.user_agents.is_empty());
+        assert!(
+            s.channel.user_agents.iter().all(|agent| agent == expected),
+            "{:?}",
+            s.channel.user_agents
+        );
     }
     #[tokio::test]
     async fn channel_operations_execute_once_with_receipts_on_the_channel() {

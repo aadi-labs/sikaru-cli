@@ -13,6 +13,8 @@ pub struct CreateConnection {
     pub kind: CreateConnectionKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ownership: Option<CreateConnectionOwnership>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
 }
 
 impl CreateConnection {
@@ -29,6 +31,7 @@ pub struct CreateConnectionBuilder {
     display_name: Option<String>,
     kind: Option<CreateConnectionKind>,
     ownership: Option<CreateConnectionOwnership>,
+    slug: Option<String>,
 }
 
 impl CreateConnectionBuilder {
@@ -57,6 +60,11 @@ impl CreateConnectionBuilder {
         self
     }
 
+    pub fn slug(mut self, value: impl Into<String>) -> Self {
+        self.slug = Some(value.into());
+        self
+    }
+
     /// Consumes the builder and constructs a [`CreateConnection`].
     /// This method will fail if any of the following fields are not set:
     /// - [`config`](CreateConnectionBuilder::config)
@@ -69,6 +77,7 @@ impl CreateConnectionBuilder {
             display_name: self.display_name.ok_or_else(|| BuildError::missing_field("display_name"))?,
             kind: self.kind.ok_or_else(|| BuildError::missing_field("kind"))?,
             ownership: self.ownership,
+            slug: self.slug,
         })
     }
 }

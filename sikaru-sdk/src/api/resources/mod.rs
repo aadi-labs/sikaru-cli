@@ -3,6 +3,7 @@
 //! This module contains client implementations for:
 //!
 //! - **Activation**
+//! - **AgentDocuments**
 //! - **AgentImports**
 //! - **Agents**
 //! - **CapabilityCeilings**
@@ -61,6 +62,7 @@ use crate::{ApiError, ClientConfig};
 
 pub mod activation;
 pub mod agent_budgets;
+pub mod agent_documents;
 pub mod agent_imports;
 pub mod agents;
 pub mod capability_ceilings;
@@ -116,6 +118,7 @@ pub mod workflows;
 pub struct ApiClient {
     pub config: ClientConfig,
     pub activation: ActivationClient,
+    pub agent_documents: AgentDocumentsClient,
     pub agent_imports: AgentImportsClient,
     pub agents: AgentsClient,
     pub capability_ceilings: CapabilityCeilingsClient,
@@ -176,6 +179,7 @@ impl ApiClient {
         Ok(Self {
             config: config.clone(),
             activation: ActivationClient::new(config.clone())?,
+            agent_documents: AgentDocumentsClient::new(config.clone())?,
             agent_imports: AgentImportsClient::new(config.clone())?,
             agents: AgentsClient::new(config.clone())?,
             capability_ceilings: CapabilityCeilingsClient::new(config.clone())?,
@@ -235,6 +239,7 @@ impl ApiClient {
 
 pub use activation::ActivationClient;
 pub use agent_budgets::AgentBudgetsClient;
+pub use agent_documents::AgentDocumentsClient;
 pub use agent_imports::AgentImportsClient;
 pub use agents::AgentsClient;
 pub use capability_ceilings::CapabilityCeilingsClient;

@@ -10,8 +10,8 @@
 pub mod resources;
 
 pub use resources::{
-    ActivationClient, AgentBudgetsClient, AgentImportsClient, AgentsClient, ApiClient,
-    CapabilityCeilingsClient, ChangesetsClient, ChecksClient, ComputeAttachmentsClient,
+    ActivationClient, AgentBudgetsClient, AgentDocumentsClient, AgentImportsClient, AgentsClient,
+    ApiClient, CapabilityCeilingsClient, ChangesetsClient, ChecksClient, ComputeAttachmentsClient,
     ComputeCredentialsClient, ComputeEnvironmentsClient, ComputeOperationsClient,
     ComputeWorkersClient, ComputeWorkspacesClient, ConnectionsClient, ContextRegistryClient,
     ConversationsClient, DeploymentsClient, EnvironmentsClient, EvalSeedsClient,

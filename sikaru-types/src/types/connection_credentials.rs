@@ -8,6 +8,8 @@ pub struct ConnectionCredentials {
     pub oauth_client_secret: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
 }
 
 impl ConnectionCredentials {
@@ -21,6 +23,7 @@ impl ConnectionCredentials {
 pub struct ConnectionCredentialsBuilder {
     oauth_client_secret: Option<String>,
     token: Option<String>,
+    value: Option<String>,
 }
 
 impl ConnectionCredentialsBuilder {
@@ -34,11 +37,17 @@ impl ConnectionCredentialsBuilder {
         self
     }
 
+    pub fn value(mut self, value: impl Into<String>) -> Self {
+        self.value = Some(value.into());
+        self
+    }
+
     /// Consumes the builder and constructs a [`ConnectionCredentials`].
     pub fn build(self) -> Result<ConnectionCredentials, BuildError> {
         Ok(ConnectionCredentials {
             oauth_client_secret: self.oauth_client_secret,
             token: self.token,
+            value: self.value,
         })
     }
 }

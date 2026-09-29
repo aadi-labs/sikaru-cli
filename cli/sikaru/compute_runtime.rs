@@ -1,23 +1,25 @@
 //! Executor lifecycle: local authority and durable effects precede network receipts.
 use super::{
+    checkpoint::{self, Plan, RemoteSlot, RepoPaths, Trigger},
     config::Bootstrap,
     journal::{Binding, Journal},
     process::Processes,
     transport::{
-        channel_backoff, maintain_lease, Channel, ChannelEnd, ChannelEvent, Delivery, Opened,
-        Transport,
+        channel_backoff, maintain_lease, Channel, ChannelEnd, ChannelEvent, Delivery, HttpIdentity,
+        Opened, Transport,
     },
 };
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sikaru_sdk::api::*;
-use std::{sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::{sync::watch, time::Instant};
 
-pub async fn serve(b: Bootstrap, base_url: String, http: reqwest::Client) -> Result<Value> {
-    serve_with_options(b, base_url, http, RunOptions::default()).await
-}
 #[derive(Default)]
 pub struct RunOptions {
     pub interactive: bool,
@@ -25,11 +27,15 @@ pub struct RunOptions {
     pub timeout: Option<Duration>,
     pub stop: Option<watch::Receiver<bool>>,
     pub admission: Option<watch::Receiver<bool>>,
+    /// Hidden `--no-workspace-checkpoints`: no private repository, remote or push.
+    pub skip_checkpoints: bool,
+    /// Controller state inside the workspace that checkpoints leave out.
+    pub private_dirs: Vec<PathBuf>,
 }
 pub async fn serve_with_options(
     b: Bootstrap,
     base_url: String,
-    http: reqwest::Client,
+    http: HttpIdentity,
     options: RunOptions,
 ) -> Result<Value> {
     let binding = Binding::from_bootstrap(&b)?;
@@ -38,11 +44,12 @@ pub async fn serve_with_options(
     let startup = Instant::now() + Duration::from_secs(180);
     let current = transport.status(startup).await?;
     transport.validate(&current)?;
-    // A scoped credential for a higher claimed epoch is backend proof that prior teardown was accepted.
     let mut journal = Journal::open_verified(&b.state_dir, binding, instance, true)?;
     let mut processes = Processes::new(&journal, Duration::from_secs(b.command_timeout_seconds));
+    // Local and before readiness: no lease exists while the repository opens.
+    let repository = checkpoint_repository(&b, &options).await;
     let preparation = prepare(&transport, &mut journal, &processes, startup).await;
-    let outcome = match preparation {
+    let (outcome, cleanup) = match preparation {
         Ok(deadline) => {
             progress(
                 options.interactive,
@@ -55,14 +62,40 @@ pub async fn serve_with_options(
                 &mut processes,
                 deadline,
                 options,
+                repository,
             )
             .await
         }
-        Err(_) => Err(anyhow::anyhow!(
-            "recovery_required: executor could not establish original authority"
-        )),
+        Err(_) => (
+            Err(anyhow::anyhow!(
+                "recovery_required: executor could not establish original authority"
+            )),
+            processes.cleanup(&mut journal),
+        ),
     };
-    finish(outcome, &transport, &mut journal, &mut processes).await
+    finish(outcome, cleanup, &transport, &mut journal).await
+}
+async fn checkpoint_repository(b: &Bootstrap, options: &RunOptions) -> Option<RepoPaths> {
+    if options.skip_checkpoints {
+        progress(
+            options.interactive,
+            "Workspace checkpoints are off for this run.",
+            json!({"event":"checkpoint_skipped","reason":"disabled"}),
+        );
+        return None;
+    }
+    let paths = RepoPaths::new(&b.workspace, &b.state_dir, &options.private_dirs);
+    match checkpoint::prepare(&paths).await {
+        Ok(()) => Some(paths),
+        Err(_) => {
+            progress(
+                options.interactive,
+                "Workspace checkpoints are unavailable for this run.",
+                json!({"event":"checkpoint_failed","trigger":null,"reason":"repository_unavailable"}),
+            );
+            None
+        }
+    }
 }
 async fn prepare(
     transport: &Transport,
@@ -143,26 +176,88 @@ async fn replay_receipts(
     }
     Ok(())
 }
+/// Serve the run, then capture the workspace while the lease is still renewed. Returns the
+/// run's outcome and the local process cleanup, which precedes the capture.
 async fn run(
     transport: Arc<Transport>,
     journal: &mut Journal,
     processes: &mut Processes,
     deadline: Instant,
     mut options: RunOptions,
-) -> Result<Value> {
+    repository: Option<RepoPaths>,
+) -> (Result<Value>, Result<()>) {
     let (lease, receiver) = watch::channel(deadline);
     let heartbeat = maintain_lease(transport.clone(), lease);
     tokio::pin!(heartbeat);
+    let slot = RemoteSlot::default();
+    let checkpoints = repository.is_some();
+    let keeper = async {
+        if checkpoints {
+            checkpoint::keep_remote(&transport, &slot, receiver.clone()).await;
+        }
+        std::future::pending::<()>().await
+    };
+    tokio::pin!(keeper);
+    let completed = Mutex::new(None::<String>);
     let admission = options.admission.take();
     let approval_wait = options.approval_wait;
-    tokio::select! {
+    let interactive = options.interactive;
+    let mut lease_held = true;
+    let outcome = tokio::select! {
         biased;
         _=termination_signal()=>Ok(json!({"status":"cancelled","reason":"signal","execution":null})),
         _=stop_requested(&mut options.stop)=>Ok(json!({"status":"cancelled","reason":"controller_stopped","execution":null})),
         _=run_deadline(options.timeout)=>Ok(json!({"status":"cancelled","reason":"deadline","execution":null})),
-        result=&mut heartbeat=>{result?;bail!("lease_expired")},
-        result=async {await_admission(admission).await?;work_loop(&transport,journal,processes,receiver,approval_wait).await}=>result,
+        result=&mut heartbeat=>{
+            lease_held = false;
+            match result { Err(error) => Err(error), Ok(()) => Err(anyhow::anyhow!("lease_expired")) }
+        },
+        _=&mut keeper=>unreachable!("the remote keeper never returns"),
+        result=async {await_admission(admission).await?;work_loop(&transport,journal,processes,receiver.clone(),approval_wait,&completed).await}=>result,
+    };
+    // Owned processes stop before the workspace is captured.
+    let cleanup = processes.cleanup(journal);
+    let Some(repo) = repository else {
+        return (outcome, cleanup);
+    };
+    let plan = Plan {
+        trigger: Trigger::from_outcome(&outcome, journal.has_uncertain_effects()),
+        run_id: completed.into_inner().unwrap_or_else(|p| p.into_inner()),
+        repo,
+        interactive,
+    };
+    let status = outcome.as_ref().map_or("recovery_required", |v| {
+        v["status"].as_str().unwrap_or("failed")
+    });
+    progress(
+        interactive,
+        "Run finished; saving the workspace…",
+        json!({"event":"run_finished","status":status,"run_id":plan.run_id}),
+    );
+    let local_clean = cleanup.is_ok();
+    let initially_held = lease_held;
+    // Reconciliation and capture share the heartbeat polling loop.
+    let capture = async {
+        if plan.trigger == Trigger::Turn && initially_held && local_clean {
+            let deadline = *receiver.borrow();
+            let _ = reconcile(&transport, journal, processes, deadline).await;
+        }
+        checkpoint::checkpoint(&transport, &plan, &slot, async |deadline| {
+            if !local_clean {
+                bail!("cleanup_unconfirmed");
+            }
+            reconcile(&transport, journal, processes, deadline).await
+        })
+        .await;
+    };
+    tokio::pin!(capture);
+    loop {
+        tokio::select! {
+            _ = &mut capture => break,
+            _ = &mut heartbeat, if lease_held => lease_held = false,
+        }
     }
+    (outcome, cleanup)
 }
 async fn work_loop(
     transport: &Transport,
@@ -170,6 +265,7 @@ async fn work_loop(
     processes: &mut Processes,
     lease: watch::Receiver<Instant>,
     approval_wait: Duration,
+    completed: &Mutex<Option<String>>,
 ) -> Result<Value> {
     let mut work = Work {
         transport,
@@ -178,6 +274,7 @@ async fn work_loop(
         lease,
         approval_wait,
         approval_deadline: None,
+        completed,
     };
     let mut link = ChannelLink::default();
     loop {
@@ -212,6 +309,7 @@ struct Work<'a> {
     lease: watch::Receiver<Instant>,
     approval_wait: Duration,
     approval_deadline: Option<Instant>,
+    completed: &'a Mutex<Option<String>>,
 }
 enum Served {
     Done(Value),
@@ -225,17 +323,10 @@ impl Work<'_> {
         channel: Option<&mut Channel>,
     ) -> Result<Served> {
         self.transport.validate(&page.attachment)?;
-        if page.workspace_checkpoint.is_some() {
-            checkpoint_workspace(
-                self.transport,
-                self.journal,
-                self.processes,
-                &page,
-                &self.lease,
-            )
-            .await?;
-            return Ok(Served::Wait(Duration::from_secs(1), None));
+        if let Some(run) = page.execution.as_ref().filter(|run| run.terminal) {
+            *self.completed.lock().unwrap_or_else(|p| p.into_inner()) = Some(run.run_id.clone());
         }
+
         if let Some(result) =
             completion_after_wait(&page, self.approval_wait, &mut self.approval_deadline)
         {
@@ -338,12 +429,10 @@ impl Work<'_> {
         }
     }
 }
-/// A running turn with nothing but operations: checkpoints, approvals and
+/// A running turn with nothing but operations: approvals and
 /// terminal or stopping states are served by the HTTP route.
 fn channel_page(page: &WorkPage) -> bool {
-    page.transport == Some(WorkPageTransport::Channel)
-        && page.workspace_checkpoint.is_none()
-        && completion(page).is_none()
+    page.transport == Some(WorkPageTransport::Channel) && completion(page).is_none()
 }
 const CHANNEL_ATTEMPTS: u32 = 3;
 /// Channel attempts for this run. After `CHANNEL_ATTEMPTS` consecutive failures
@@ -372,25 +461,6 @@ impl ChannelLink {
         }
         tokio::time::sleep(channel_backoff(self.failures)).await;
         Ok(())
-    }
-}
-
-async fn checkpoint_workspace(
-    transport: &Transport,
-    journal: &mut Journal,
-    processes: &Processes,
-    page: &WorkPage,
-    lease: &watch::Receiver<Instant>,
-) -> Result<()> {
-    super::workspace_flow::validate(page, journal)?;
-    if !page.live_handles.is_empty() {
-        let deadline = *lease.borrow();
-        reconcile(transport, journal, processes, deadline).await?;
-        return Ok(());
-    }
-    match super::workspace_flow::publish(transport, journal, page, lease).await {
-        Err(error) if super::transport::transient(&error) => Ok(()),
-        result => result,
     }
 }
 
@@ -522,11 +592,10 @@ async fn lease_expiry(mut lease: watch::Receiver<Instant>) {
 }
 async fn finish(
     outcome: Result<Value>,
+    cleanup: Result<()>,
     transport: &Transport,
     journal: &mut Journal,
-    processes: &mut Processes,
 ) -> Result<Value> {
-    let cleanup = processes.cleanup(journal);
     if let Err(error) = &cleanup {
         eprintln!("native process cleanup failed: {error}");
     }

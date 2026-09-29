@@ -15,31 +15,50 @@ use tokio::{
     time::Instant,
 };
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http, Message};
+/// The CLI's HTTP client and the User-Agent it sends; the channel upgrade repeats it.
+#[derive(Clone)]
+pub struct HttpIdentity {
+    pub client: reqwest::Client,
+    pub user_agent: String,
+}
+impl HttpIdentity {
+    pub fn from_config(config: &fern_cli_sdk::http::HttpConfig) -> Result<Self> {
+        Ok(Self {
+            client: config.build_client()?,
+            user_agent: config.user_agent(),
+        })
+    }
+}
 pub struct Transport {
     pub client: ApiClient,
     pub binding: Binding,
+    /// The same client the generated API uses; checkpoint pushes reuse its TLS and headers.
+    pub http: reqwest::Client,
     channel_url: Result<String, String>,
     token: String,
+    user_agent: String,
 }
 impl Transport {
     pub fn new(
         b: &Bootstrap,
         base_url: String,
-        http: reqwest::Client,
+        http: HttpIdentity,
         binding: Binding,
     ) -> Result<Arc<Self>> {
         let channel_url = channel_url(&base_url, &binding).map_err(|e| e.to_string());
         let client = ApiClientBuilder::new(base_url)
             .token(b.token.clone())
             .max_retries(0)
-            .reqwest_client(http)
+            .reqwest_client(http.client.clone())
             .build()
             .map_err(|_| anyhow::anyhow!("executor client configuration failed"))?;
         Ok(Arc::new(Self {
             client,
             binding,
+            http: http.client,
             channel_url,
             token: b.token.clone(),
+            user_agent: http.user_agent,
         }))
     }
     pub async fn status(&self, deadline: Instant) -> Result<AttachmentView> {
@@ -80,60 +99,6 @@ impl Transport {
         )
         .await
     }
-    pub async fn workspace_checkpoint(
-        &self,
-        run_id: &str,
-        deadline: Instant,
-    ) -> Result<WorkspaceCheckpointView> {
-        bounded(
-            deadline,
-            self.client.compute_workspaces.get(
-                &self.binding.project_id,
-                &self.binding.attachment_id,
-                run_id,
-                None,
-            ),
-        )
-        .await
-    }
-    pub async fn workspace_blob(
-        &self,
-        run_id: &str,
-        hash: &str,
-        bytes: Vec<u8>,
-        deadline: Instant,
-    ) -> Result<WorkspaceBlobView> {
-        bounded(
-            deadline,
-            self.client.compute_workspaces.put_blob(
-                &self.binding.project_id,
-                &self.binding.attachment_id,
-                run_id,
-                hash,
-                &bytes,
-                None,
-            ),
-        )
-        .await
-    }
-    pub async fn workspace_tree(
-        &self,
-        run_id: &str,
-        tree: &WorkspaceTreeInput,
-        deadline: Instant,
-    ) -> Result<WorkspaceCheckpointView> {
-        bounded(
-            deadline,
-            self.client.compute_workspaces.commit_tree(
-                &self.binding.project_id,
-                &self.binding.attachment_id,
-                run_id,
-                tree,
-                None,
-            ),
-        )
-        .await
-    }
     pub fn validate(&self, a: &AttachmentView) -> Result<()> {
         let b = &self.binding;
         let same = a.id == b.attachment_id
@@ -158,11 +123,44 @@ impl Transport {
             capabilities: vec![
                 ReadyInputCapabilitiesItem::ComputeExecute,
                 ReadyInputCapabilitiesItem::BashRun,
-                ReadyInputCapabilitiesItem::FilesystemCheckpointV1,
                 ReadyInputCapabilitiesItem::ConditionWaitsV1,
             ],
         }
     }
+    /// Mint the session's scoped git remote. The service mints only while the lease is valid.
+    pub async fn workspace_remote(&self, deadline: Instant) -> Result<WorkspaceRemoteView> {
+        bounded(
+            deadline,
+            self.client.compute_workspaces.remote(
+                &self.binding.project_id,
+                &self.binding.attachment_id,
+                &WorkspaceRemoteInput {},
+                None,
+            ),
+        )
+        .await
+    }
+    /// Record a pushed head. The service answers after it has published the run's outputs,
+    /// so this call gets the checkpoint's own deadline instead of the 5 s call bound.
+    pub async fn record_checkpoint(
+        &self,
+        body: &WorkspaceCheckpointInput,
+        deadline: Instant,
+    ) -> Result<WorkspaceCheckpointView> {
+        tokio::time::timeout_at(
+            deadline,
+            self.client.compute_workspaces.record(
+                &self.binding.project_id,
+                &self.binding.attachment_id,
+                body,
+                None,
+            ),
+        )
+        .await
+        .map_err(|_| anyhow::Error::new(TransportFailure::Transient))?
+        .map_err(record_error)
+    }
+
     pub async fn ready(&self, instance: &str, deadline: Instant) -> Result<Instant> {
         let start = Instant::now();
         let a = bounded(
@@ -287,6 +285,29 @@ pub enum TransportFailure {
     Permanent,
     #[error("request_rejected_{0}")]
     Rejected(u16),
+}
+/// Record refusals the service names. The error is matched, never formatted into output.
+#[derive(Debug, thiserror::Error)]
+pub enum RecordRefusal {
+    #[error("commit_not_on_branch")]
+    NotOnBranch,
+    #[error("turn_already_checkpointed")]
+    AlreadyCheckpointed,
+    #[error("workspace_not_quiescent")]
+    NotQuiescent,
+}
+fn record_error(error: ApiError) -> anyhow::Error {
+    let described = format!("{error:?}");
+    if described.contains("commit_not_on_branch") {
+        return anyhow::Error::new(RecordRefusal::NotOnBranch);
+    }
+    if described.contains("turn_already_checkpointed") {
+        return anyhow::Error::new(RecordRefusal::AlreadyCheckpointed);
+    }
+    if described.contains("workspace_not_quiescent") {
+        return anyhow::Error::new(RecordRefusal::NotQuiescent);
+    }
+    classify(error)
 }
 pub fn classify(error: ApiError) -> anyhow::Error {
     if let Some(status) = rejected_status(&error) {
@@ -527,8 +548,12 @@ impl Channel {
                 return Delivery::NotAccepted;
             };
             match event {
-                ChannelEvent::Accepted(id) if id == receipt.tool_call_id => return Delivery::Accepted,
-                ChannelEvent::Rejected(id) if id.as_ref().is_none_or(|id| *id == receipt.tool_call_id) => {
+                ChannelEvent::Accepted(id) if id == receipt.tool_call_id => {
+                    return Delivery::Accepted
+                }
+                ChannelEvent::Rejected(id)
+                    if id.as_ref().is_none_or(|id| *id == receipt.tool_call_id) =>
+                {
                     return Delivery::NotAccepted
                 }
                 ChannelEvent::Page(page) => self.page = Some(page),
@@ -561,7 +586,7 @@ impl Channel {
 }
 
 impl Transport {
-    /// Upgrade with the restricted credential in the Authorization header only.
+    /// Upgrade with the restricted credential in the Authorization header and the CLI's User-Agent.
     pub async fn open_channel(&self) -> Opened {
         let Ok(request) = self.channel_request() else {
             return Opened::Ended(ChannelEnd::Lost);
@@ -596,6 +621,10 @@ impl Transport {
         request
             .headers_mut()
             .insert(http::header::AUTHORIZATION, bearer);
+        let agent = http::HeaderValue::from_str(&self.user_agent)?;
+        request
+            .headers_mut()
+            .insert(http::header::USER_AGENT, agent);
         Ok(request)
     }
     /// The handshake must name this attachment's authority and select the channel.
@@ -645,11 +674,7 @@ pub fn channel_url(base_url: &str, b: &Binding) -> Result<String> {
 }
 
 impl Channel {
-    fn start(
-        sink: SplitSink<Socket, Message>,
-        stream: SplitStream<Socket>,
-        h: &Handshake,
-    ) -> Self {
+    fn start(sink: SplitSink<Socket, Message>, stream: SplitStream<Socket>, h: &Handshake) -> Self {
         let (interval, silence) = heartbeat_bounds(h);
         let (events, inbound) = mpsc::channel(64);
         let (outbound, queue) = mpsc::channel(8);
@@ -859,7 +884,10 @@ mod channel_tests {
                 "owner_epoch":1,"workspace_generation":"generation","transport":"channel","heartbeat_interval_seconds":25.0,
                 "heartbeat_timeout_seconds":60.0,"max_frame_bytes":262144,"inbound_frame_limit":2000,"inbound_frame_window_seconds":300.0}),
             ),
-            ("OperationsFrame", json!({"type":"operations","page":page()})),
+            (
+                "OperationsFrame",
+                json!({"type":"operations","page":page()}),
+            ),
             (
                 "ReceiptAcceptedFrame",
                 json!({"type":"receipt_accepted","run_id":"run","receipt":{"tool_call_id":"call","created":true,"status":"accepted"}}),
@@ -890,7 +918,9 @@ mod channel_tests {
     #[test]
     fn server_frames_decode_by_type_and_close_reasons_choose_the_next_transport() {
         let frames = server_frames();
-        let handshake = decode(&frames[0].1.to_string()).and_then(Handshake::from_frame).unwrap();
+        let handshake = decode(&frames[0].1.to_string())
+            .and_then(Handshake::from_frame)
+            .unwrap();
         assert!(handshake.channel && handshake.protocol_ok && handshake.owner_epoch == 1);
         assert!(
             matches!(event(&frames[1].1), Inbound::Event(ChannelEvent::Page(p)) if p.transport == Some(WorkPageTransport::Channel))
@@ -903,8 +933,14 @@ mod channel_tests {
         );
         assert!(matches!(event(&frames[4].1), Inbound::Skip));
         // A second handshake or an unknown frame ends the channel.
-        assert!(matches!(event(&frames[0].1), Inbound::End(ChannelEnd::Lost)));
-        assert!(matches!(event(&json!({"type":"unknown"})), Inbound::End(ChannelEnd::Lost)));
+        assert!(matches!(
+            event(&frames[0].1),
+            Inbound::End(ChannelEnd::Lost)
+        ));
+        assert!(matches!(
+            event(&json!({"type":"unknown"})),
+            Inbound::End(ChannelEnd::Lost)
+        ));
         let end = |reason: &str| match event(&json!({"type":"close","reason":reason,"detail":""})) {
             Inbound::End(end) => end,
             _ => panic!("close frame"),
@@ -940,7 +976,12 @@ mod channel_tests {
             .is_none_or(|h| !h.protocol_ok));
         let mut sample = server_frames()[0].1.clone();
         sample["transport"] = json!("poll");
-        assert!(!decode(&sample.to_string()).and_then(Handshake::from_frame).unwrap().channel);
+        assert!(
+            !decode(&sample.to_string())
+                .and_then(Handshake::from_frame)
+                .unwrap()
+                .channel
+        );
     }
     #[test]
     fn reconnect_delays_are_spread_not_synchronized() {
@@ -993,8 +1034,7 @@ mod channel_tests {
         }
         let page_fields = schemas["WorkPage"]["properties"].as_object().unwrap();
         let typed: WorkPage = serde_json::from_value(page()).unwrap();
-        let mut typed = serde_json::to_value(typed).unwrap();
-        typed["workspace_checkpoint"] = Value::Null;
+        let typed = serde_json::to_value(typed).unwrap();
         for key in page_fields.keys() {
             assert!(
                 typed.get(key).is_some(),

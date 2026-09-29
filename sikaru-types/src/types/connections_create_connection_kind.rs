@@ -7,6 +7,7 @@ use super::*;
 pub enum CreateConnectionKind {
     Mcp,
     Composio,
+    Secret,
     /// This variant is used for forward compatibility.
     /// If the server sends a value not recognized by the current SDK version,
     /// it will be captured here with the raw string value.
@@ -17,6 +18,7 @@ impl Serialize for CreateConnectionKind {
         match self {
             Self::Mcp => serializer.serialize_str("mcp"),
             Self::Composio => serializer.serialize_str("composio"),
+            Self::Secret => serializer.serialize_str("secret"),
             Self::__Unknown(val) => serializer.serialize_str(val),
         }
     }
@@ -28,6 +30,7 @@ impl<'de> Deserialize<'de> for CreateConnectionKind {
         match value.as_str() {
             "mcp" => Ok(Self::Mcp),
             "composio" => Ok(Self::Composio),
+            "secret" => Ok(Self::Secret),
             _ => Ok(Self::__Unknown(value)),
         }
     }
@@ -38,6 +41,7 @@ impl fmt::Display for CreateConnectionKind {
         match self {
             Self::Mcp => write!(f, "mcp"),
             Self::Composio => write!(f, "composio"),
+            Self::Secret => write!(f, "secret"),
             Self::__Unknown(val) => write!(f, "{}", val),
         }
     }

@@ -8,10 +8,12 @@ pub struct CreateManagedAgentSourceRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analysis_summary: Option<HashMap<String, serde_json::Value>>,
     #[serde(rename = "contentDigest")]
-    #[serde(default)]
-    pub content_digest: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_digest: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub definition: Option<AgentDefinition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<String>,
     #[serde(rename = "exportPolicy")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub export_policy: Option<CreateManagedAgentSourceRequestExportPolicy>,
@@ -35,6 +37,7 @@ pub struct CreateManagedAgentSourceRequestBuilder {
     analysis_summary: Option<HashMap<String, serde_json::Value>>,
     content_digest: Option<String>,
     definition: Option<AgentDefinition>,
+    document: Option<String>,
     export_policy: Option<CreateManagedAgentSourceRequestExportPolicy>,
     source_kind: Option<CreateManagedAgentSourceRequestSourceKind>,
     storage_ref: Option<String>,
@@ -56,6 +59,11 @@ impl CreateManagedAgentSourceRequestBuilder {
         self
     }
 
+    pub fn document(mut self, value: impl Into<String>) -> Self {
+        self.document = Some(value.into());
+        self
+    }
+
     pub fn export_policy(mut self, value: CreateManagedAgentSourceRequestExportPolicy) -> Self {
         self.export_policy = Some(value);
         self
@@ -72,13 +80,12 @@ impl CreateManagedAgentSourceRequestBuilder {
     }
 
     /// Consumes the builder and constructs a [`CreateManagedAgentSourceRequest`].
-    /// This method will fail if any of the following fields are not set:
-    /// - [`content_digest`](CreateManagedAgentSourceRequestBuilder::content_digest)
     pub fn build(self) -> Result<CreateManagedAgentSourceRequest, BuildError> {
         Ok(CreateManagedAgentSourceRequest {
             analysis_summary: self.analysis_summary,
-            content_digest: self.content_digest.ok_or_else(|| BuildError::missing_field("content_digest"))?,
+            content_digest: self.content_digest,
             definition: self.definition,
+            document: self.document,
             export_policy: self.export_policy,
             source_kind: self.source_kind,
             storage_ref: self.storage_ref,

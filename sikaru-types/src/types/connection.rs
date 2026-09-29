@@ -23,9 +23,13 @@ pub struct Connection {
     #[serde(default)]
     pub revocation: String,
     #[serde(default)]
+    pub slug: String,
+    #[serde(default)]
     pub status: String,
     #[serde(default)]
     pub tools: Vec<ConnectionTool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_by: Option<ConnectionUsage>,
     #[serde(default)]
     pub version: i64,
 }
@@ -48,8 +52,10 @@ pub struct ConnectionBuilder {
     owner: Option<String>,
     ownership: Option<String>,
     revocation: Option<String>,
+    slug: Option<String>,
     status: Option<String>,
     tools: Option<Vec<ConnectionTool>>,
+    used_by: Option<ConnectionUsage>,
     version: Option<i64>,
 }
 
@@ -99,6 +105,11 @@ impl ConnectionBuilder {
         self
     }
 
+    pub fn slug(mut self, value: impl Into<String>) -> Self {
+        self.slug = Some(value.into());
+        self
+    }
+
     pub fn status(mut self, value: impl Into<String>) -> Self {
         self.status = Some(value.into());
         self
@@ -106,6 +117,11 @@ impl ConnectionBuilder {
 
     pub fn tools(mut self, value: Vec<ConnectionTool>) -> Self {
         self.tools = Some(value);
+        self
+    }
+
+    pub fn used_by(mut self, value: ConnectionUsage) -> Self {
+        self.used_by = Some(value);
         self
     }
 
@@ -124,6 +140,7 @@ impl ConnectionBuilder {
     /// - [`owner`](ConnectionBuilder::owner)
     /// - [`ownership`](ConnectionBuilder::ownership)
     /// - [`revocation`](ConnectionBuilder::revocation)
+    /// - [`slug`](ConnectionBuilder::slug)
     /// - [`status`](ConnectionBuilder::status)
     /// - [`tools`](ConnectionBuilder::tools)
     /// - [`version`](ConnectionBuilder::version)
@@ -138,8 +155,10 @@ impl ConnectionBuilder {
             owner: self.owner.ok_or_else(|| BuildError::missing_field("owner"))?,
             ownership: self.ownership.ok_or_else(|| BuildError::missing_field("ownership"))?,
             revocation: self.revocation.ok_or_else(|| BuildError::missing_field("revocation"))?,
+            slug: self.slug.ok_or_else(|| BuildError::missing_field("slug"))?,
             status: self.status.ok_or_else(|| BuildError::missing_field("status"))?,
             tools: self.tools.ok_or_else(|| BuildError::missing_field("tools"))?,
+            used_by: self.used_by,
             version: self.version.ok_or_else(|| BuildError::missing_field("version"))?,
         })
     }

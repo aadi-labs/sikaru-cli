@@ -1,5 +1,5 @@
 use crate::api::*;
-use crate::{ApiError, ClientConfig, HttpClient, RequestOptions};
+use crate::{ApiError, ClientConfig, HttpClient, QueryBuilder, RequestOptions};
 use reqwest::Method;
 
 pub struct ConnectionsClient {
@@ -71,6 +71,7 @@ impl ConnectionsClient {
     ///                 kind: CreateConnectionKind::Mcp,
     ///                 credentials: None,
     ///                 ownership: None,
+    ///                 slug: None,
     ///             },
     ///             None,
     ///         )
@@ -113,6 +114,52 @@ impl ConnectionsClient {
     ///     let client = SikaruClient::new(config).expect("Failed to build client");
     ///     client
     ///         .connections
+    ///         .list_apps(
+    ///             &"project_id".to_string(),
+    ///             &ListAppsQueryRequest {
+    ///                 ..Default::default()
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn list_apps(
+        &self,
+        project_id: &str,
+        request: &ListAppsQueryRequest,
+        options: Option<RequestOptions>,
+    ) -> Result<ConnectionApps, ApiError> {
+        self.http_client
+            .execute_request(
+                Method::GET,
+                &format!("v1/projects/{}/connections/catalog/apps", project_id),
+                None,
+                QueryBuilder::new()
+                    .serialize("search", request.search.clone())
+                    .serialize("category", request.category.clone())
+                    .serialize("cursor", request.cursor.clone())
+                    .int("limit", request.limit.clone())
+                    .build(),
+                options,
+            )
+            .await
+    }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .connections
     ///         .get_connection(
     ///             &"project_id".to_string(),
     ///             &"connection_id".to_string(),
@@ -132,6 +179,56 @@ impl ConnectionsClient {
                 Method::GET,
                 &format!("v1/projects/{}/connections/{}", project_id, connection_id),
                 None,
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .connections
+    ///         .update_connection(
+    ///             &"project_id".to_string(),
+    ///             &"connection_id".to_string(),
+    ///             &UpdateConnection {
+    ///                 expected_version: 1,
+    ///                 allowed_hosts: None,
+    ///                 display_name: None,
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn update_connection(
+        &self,
+        project_id: &str,
+        connection_id: &str,
+        request: &UpdateConnection,
+        options: Option<RequestOptions>,
+    ) -> Result<Connection, ApiError> {
+        let options = {
+            let mut o = options.unwrap_or_default();
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::PATCH,
+                &format!("v1/projects/{}/connections/{}", project_id, connection_id),
+                Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
                 None,
                 options,
             )
@@ -615,6 +712,95 @@ impl ConnectionsClient {
                 &format!(
                     "v1/projects/{}/connections/{}/grants/{}",
                     project_id, connection_id, grant_id
+                ),
+                None,
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .connections
+    ///         .revoke(
+    ///             &"project_id".to_string(),
+    ///             &"connection_id".to_string(),
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn revoke(
+        &self,
+        project_id: &str,
+        connection_id: &str,
+        options: Option<RequestOptions>,
+    ) -> Result<ConnectionRevocation, ApiError> {
+        let options = {
+            let mut o = options.unwrap_or_default();
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::POST,
+                &format!(
+                    "v1/projects/{}/connections/{}/revoke",
+                    project_id, connection_id
+                ),
+                None,
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .connections
+    ///         .usage(
+    ///             &"project_id".to_string(),
+    ///             &"connection_id".to_string(),
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn usage(
+        &self,
+        project_id: &str,
+        connection_id: &str,
+        options: Option<RequestOptions>,
+    ) -> Result<ConnectionUsage, ApiError> {
+        self.http_client
+            .execute_request(
+                Method::GET,
+                &format!(
+                    "v1/projects/{}/connections/{}/usage",
+                    project_id, connection_id
                 ),
                 None,
                 None,

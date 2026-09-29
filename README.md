@@ -370,21 +370,30 @@ timeout.
 
 ### Workspace checkpoints
 
-The native attachment executor captures the selected task workspace when a run
-completes and waits for its checkpoint to be published before reporting completion.
-Checkpoints retain regular file contents, executable permissions, and the absence
-of deleted files. Keep credentials and private executor state outside the selected
-workspace: all regular files within it are included, including hidden files.
-Symbolic links are not captured and their targets are never read; commands may
-still create and use them, and a restored checkpoint omits them. Hard-linked
-files are captured by content and restore as independent copies.
+When a run ends, the executor saves the workspace as a checkpoint on the session's branch
+before it releases the workspace. A `run_finished` event on stderr marks the end of the run
+at once; saving takes at most two minutes, or five seconds after an interrupt, and then the
+result is printed. A checkpoint that cannot be saved is reported on stderr and never
+changes the run's result or exit status. Checkpoints are also saved when a run is stopped,
+interrupted by a signal, or loses its lease.
 
-Publication retries reuse the same frozen capture. A lost upload response does not
-rerun commands or capture a different workspace. Keep the private state directory
-until completion so reconnecting can recover that capture. Capture waits for owned
-processes to finish and rejects unsupported file types and workspaces exceeding the
-capture limits instead of silently dropping files.
-Checkpoints do not restore running processes or overwrite an existing local folder.
+Checkpoints record file contents, executable permissions, deletions, and symbolic links
+that stay inside the workspace. Links that point outside it, nested repositories, and
+single files too large for one upload are left out and counted in the `checkpoint_pushed`
+event. The workspace's `.gitignore` files apply, together with the service's default rules
+for dependency and build directories such as `node_modules/`, `.venv/` and `target/`.
+Ignored paths are omitted from checkpoint trees, even when they are tracked.
+Seed history retains the original commits as written.
+
+The executor keeps a private repository in its state directory. It never writes to the
+workspace or to the workspace's own `.git`, and leaves that repository's index and branches
+untouched. When the workspace is a git repository, the first checkpoint starts from the
+commit checked out when the executor started, uploading its history once; later
+checkpoints upload only what changed. Large first checkpoints are split into several
+commits.
+
+Progress is reported on stderr as `run_finished`, `checkpoint_started`,
+`checkpoint_progress`, `checkpoint_pushed` and `checkpoint_failed` JSON events.
 
 ### Command definitions
 

@@ -5,6 +5,7 @@ use super::*;
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AgentDefinitionSourceKind {
+    AgentDocument,
     AgentsMd,
     AgentMd,
     AgentSkill,
@@ -20,6 +21,7 @@ pub enum AgentDefinitionSourceKind {
 impl Serialize for AgentDefinitionSourceKind {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
+            Self::AgentDocument => serializer.serialize_str("agent_document"),
             Self::AgentsMd => serializer.serialize_str("agents_md"),
             Self::AgentMd => serializer.serialize_str("agent_md"),
             Self::AgentSkill => serializer.serialize_str("agent_skill"),
@@ -36,6 +38,7 @@ impl<'de> Deserialize<'de> for AgentDefinitionSourceKind {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = String::deserialize(deserializer)?;
         match value.as_str() {
+            "agent_document" => Ok(Self::AgentDocument),
             "agents_md" => Ok(Self::AgentsMd),
             "agent_md" => Ok(Self::AgentMd),
             "agent_skill" => Ok(Self::AgentSkill),
@@ -51,6 +54,7 @@ impl<'de> Deserialize<'de> for AgentDefinitionSourceKind {
 impl fmt::Display for AgentDefinitionSourceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AgentDocument => write!(f, "agent_document"),
             Self::AgentsMd => write!(f, "agents_md"),
             Self::AgentMd => write!(f, "agent_md"),
             Self::AgentSkill => write!(f, "agent_skill"),
