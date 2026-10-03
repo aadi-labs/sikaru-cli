@@ -497,7 +497,6 @@ mod wire {
     async fn git_checkpoint_pushes_the_working_tree_without_touching_the_task_repository() {
         let l = prepare_launch("git_task_repo").await;
         let ws = l.path.join("workspace");
-        let seed = git_remote::text(git_remote::git(&ws, &["rev-parse", "HEAD"]));
         let before = git_remote::snapshot(&ws.join(".git"));
         let output = result(start(&l).await).await;
         completed(&output);
@@ -526,10 +525,9 @@ mod wire {
             events[2]["skipped"]["link_outside_workspace"], 2,
             "escaping links are skipped, not fatal"
         );
-        assert_eq!(
-            git.parents(&head),
-            vec![seed],
-            "the session branch starts from the task HEAD"
+        assert!(
+            git.parents(&head).is_empty(),
+            "the session branch holds the working tree, not the task history"
         );
         let tree: std::collections::BTreeMap<_, _> = git
             .tree(&head)
@@ -546,9 +544,12 @@ mod wire {
             "node_modules/left-pad/index.js",
             "escape",
             "absolute",
+            ".env",
+            "deploy.pem",
         ] {
             assert!(!tree.contains_key(absent), "{absent}");
         }
+        assert!(tree.contains_key(".env.example"));
         assert!(tree.values().all(|mode| mode != "160000"));
         let s = l.oracle.state.lock().unwrap();
         assert_eq!(s.records.len(), 1);

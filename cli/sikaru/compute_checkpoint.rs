@@ -489,8 +489,8 @@ async fn record(
         }
     }
 }
-/// Push the staged tree as a chain of single-commit pushes on the session branch. Only the
-/// first push on an unborn branch may carry history.
+/// Push the staged tree as a chain of single-commit pushes on the session branch. The first
+/// checkpoint on an unborn branch is a root commit: the branch never carries task history.
 async fn push_until_current(
     transport: &Transport,
     plan: &Plan,
@@ -510,15 +510,10 @@ async fn push_until_current(
     let mut commits = 0;
     for _ in 0..=STALE_ATTEMPTS {
         remote.fresh(transport, deadline).await?;
-        let advertised = read_advertisement(transport, remote, &refname, deadline).await?;
-        let (head, target, text, haves) = (
-            advertised.head,
-            staged.tree,
-            message.clone(),
-            advertised.haves.clone(),
-        );
+        let head = read_head(transport, remote, &refname, deadline).await?;
+        let (target, text) = (staged.tree, message.clone());
         let chain = blocking(plan.repo.clone(), move |repo| {
-            repo.chain(head, &haves, target, budget, &text)
+            repo.chain(head, target, budget, &text)
         })
         .await?;
         let mut skipped = staged.skipped.clone();
@@ -532,7 +527,7 @@ async fn push_until_current(
             refname: &refname,
             limit,
         };
-        let (finished, accepted) = sender.push(&chain, &advertised).await?;
+        let (finished, accepted) = sender.push(&chain, head).await?;
         commits += accepted;
         if finished {
             let last = chain
@@ -561,10 +556,10 @@ struct ChainSender<'a> {
     limit: u64,
 }
 impl ChainSender<'_> {
-    async fn push(&mut self, chain: &Chain, advertised: &Advertised) -> Result<(bool, usize)> {
-        let mut old = advertised.head;
+    async fn push(&mut self, chain: &Chain, head: Option<Oid>) -> Result<(bool, usize)> {
+        let mut old = head;
         for (i, commit) in chain.commits.iter().copied().enumerate() {
-            let hide = pack_hides(i, old, chain.history, advertised);
+            let hide: Vec<Oid> = old.into_iter().collect();
             let pack =
                 blocking(self.plan.repo.clone(), move |repo| repo.pack(commit, &hide)).await?;
             if pack.bytes.len() as u64 + 512 > self.limit {
@@ -584,9 +579,8 @@ impl ChainSender<'_> {
             .await?;
             if outcome == PushOutcome::Refused {
                 let current =
-                    read_advertisement(self.transport, self.remote, self.refname, self.deadline)
-                        .await?;
-                if current.head == old {
+                    read_head(self.transport, self.remote, self.refname, self.deadline).await?;
+                if current == old {
                     bail!(CheckpointError::Rejected);
                 }
                 return Ok((false, i));
@@ -601,15 +595,6 @@ impl ChainSender<'_> {
         Ok((true, chain.commits.len()))
     }
 }
-fn pack_hides(index: usize, old: Option<Oid>, history: bool, advertised: &Advertised) -> Vec<Oid> {
-    if index > 0 {
-        return old.into_iter().collect();
-    }
-    let mut hide = advertised.haves.clone();
-    hide.extend(advertised.head.filter(|_| !history));
-    hide
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn push_one(
     transport: &Transport,
@@ -640,16 +625,13 @@ async fn push_one(
     }
     bail!(GitHttpError::Unauthorized)
 }
-struct Advertised {
-    head: Option<Oid>,
-    haves: Vec<Oid>,
-}
-async fn read_advertisement(
+/// The session branch head the remote advertises; None for an unborn branch.
+async fn read_head(
     transport: &Transport,
     remote: &mut Minted,
     refname: &str,
     deadline: Instant,
-) -> Result<Advertised> {
+) -> Result<Option<Oid>> {
     for attempt in 0..2 {
         match within(
             deadline,
@@ -662,15 +644,7 @@ async fn read_advertisement(
             }
             Err(error) => return Err(error),
             Ok(advertised) => {
-                let parse = |oid: &str| Oid::from_str(oid).map_err(anyhow::Error::from);
-                return Ok(Advertised {
-                    head: advertised.head.as_deref().map(parse).transpose()?,
-                    haves: advertised
-                        .haves
-                        .iter()
-                        .map(|o| parse(o))
-                        .collect::<Result<_>>()?,
-                });
+                return Ok(advertised.head.as_deref().map(Oid::from_str).transpose()?);
             }
         }
     }

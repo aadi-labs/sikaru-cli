@@ -57,8 +57,15 @@ impl ComputeWorkspacesClient {
         request: &WorkspaceCheckpointInput,
         options: Option<RequestOptions>,
     ) -> Result<WorkspaceCheckpointView, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -118,8 +125,15 @@ impl ComputeWorkspacesClient {
         request: &WorkspaceRemoteInput,
         options: Option<RequestOptions>,
     ) -> Result<WorkspaceRemoteView, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };

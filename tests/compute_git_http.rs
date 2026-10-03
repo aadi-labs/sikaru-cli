@@ -147,7 +147,7 @@ fn pkt_lines_round_trip_and_reject_truncation() {
 }
 
 #[test]
-fn advertisements_name_only_the_session_ref_and_its_haves() {
+fn advertisements_name_only_the_session_ref() {
     let oid = "a".repeat(40);
     let other = "b".repeat(40);
     let mut body = pkt_line(b"# service=git-receive-pack\n");
@@ -159,7 +159,6 @@ fn advertisements_name_only_the_session_ref_and_its_haves() {
     body.extend_from_slice(b"0000");
     let advertised = parse_advertisement(&body, REF).unwrap();
     assert_eq!(advertised.head.as_deref(), Some(oid.as_str()));
-    assert_eq!(advertised.haves, vec![other]);
     let mut unborn = pkt_line(format!("{ZERO} capabilities^{{}}\0report-status\n").as_bytes());
     unborn.extend_from_slice(b"0000");
     assert_eq!(parse_advertisement(&unborn, REF).unwrap().head, None);

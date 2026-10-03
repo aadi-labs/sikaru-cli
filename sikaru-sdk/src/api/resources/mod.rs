@@ -2,12 +2,16 @@
 //!
 //! This module contains client implementations for:
 //!
+//! - **Auth**
+//! - **HttpChannels**
+//! - **PersonalChannels**
 //! - **Activation**
 //! - **AgentDocuments**
 //! - **AgentImports**
 //! - **Agents**
 //! - **CapabilityCeilings**
 //! - **Changesets**
+//! - **Channels**
 //! - **ComputeAttachments**
 //! - **ComputeOperations**
 //! - **ComputeWorkspaces**
@@ -65,8 +69,10 @@ pub mod agent_budgets;
 pub mod agent_documents;
 pub mod agent_imports;
 pub mod agents;
+pub mod auth;
 pub mod capability_ceilings;
 pub mod changesets;
+pub mod channels;
 pub mod checks;
 pub mod compute_attachments;
 pub mod compute_credentials;
@@ -92,6 +98,7 @@ pub mod feedback;
 pub mod git_credentials;
 pub mod harness_versions;
 pub mod harnesses;
+pub mod http_channels;
 pub mod import_sessions;
 pub mod issue_clusters;
 pub mod judge_alignment;
@@ -100,6 +107,7 @@ pub mod memory_registry;
 pub mod model_gateway;
 pub mod model_settings;
 pub mod online_evaluations;
+pub mod personal_channels;
 pub mod release_watches;
 pub mod retention_policies;
 pub mod review_queue;
@@ -117,12 +125,16 @@ pub mod workflow_runs;
 pub mod workflows;
 pub struct ApiClient {
     pub config: ClientConfig,
+    pub auth: AuthClient,
+    pub http_channels: HttpChannelsClient,
+    pub personal_channels: PersonalChannelsClient,
     pub activation: ActivationClient,
     pub agent_documents: AgentDocumentsClient,
     pub agent_imports: AgentImportsClient,
     pub agents: AgentsClient,
     pub capability_ceilings: CapabilityCeilingsClient,
     pub changesets: ChangesetsClient,
+    pub channels: ChannelsClient,
     pub compute_attachments: ComputeAttachmentsClient,
     pub compute_operations: ComputeOperationsClient,
     pub compute_workspaces: ComputeWorkspacesClient,
@@ -178,12 +190,16 @@ impl ApiClient {
     pub fn new(config: ClientConfig) -> Result<Self, ApiError> {
         Ok(Self {
             config: config.clone(),
+            auth: AuthClient::new(config.clone())?,
+            http_channels: HttpChannelsClient::new(config.clone())?,
+            personal_channels: PersonalChannelsClient::new(config.clone())?,
             activation: ActivationClient::new(config.clone())?,
             agent_documents: AgentDocumentsClient::new(config.clone())?,
             agent_imports: AgentImportsClient::new(config.clone())?,
             agents: AgentsClient::new(config.clone())?,
             capability_ceilings: CapabilityCeilingsClient::new(config.clone())?,
             changesets: ChangesetsClient::new(config.clone())?,
+            channels: ChannelsClient::new(config.clone())?,
             compute_attachments: ComputeAttachmentsClient::new(config.clone())?,
             compute_operations: ComputeOperationsClient::new(config.clone())?,
             compute_workspaces: ComputeWorkspacesClient::new(config.clone())?,
@@ -242,8 +258,10 @@ pub use agent_budgets::AgentBudgetsClient;
 pub use agent_documents::AgentDocumentsClient;
 pub use agent_imports::AgentImportsClient;
 pub use agents::AgentsClient;
+pub use auth::AuthClient;
 pub use capability_ceilings::CapabilityCeilingsClient;
 pub use changesets::ChangesetsClient;
+pub use channels::ChannelsClient;
 pub use checks::ChecksClient;
 pub use compute_attachments::ComputeAttachmentsClient;
 pub use compute_credentials::ComputeCredentialsClient;
@@ -269,6 +287,7 @@ pub use feedback::FeedbackClient;
 pub use git_credentials::GitCredentialsClient;
 pub use harness_versions::HarnessVersionsClient;
 pub use harnesses::HarnessesClient;
+pub use http_channels::HttpChannelsClient;
 pub use import_sessions::ImportSessionsClient;
 pub use issue_clusters::IssueClustersClient;
 pub use judge_alignment::JudgeAlignmentClient;
@@ -277,6 +296,7 @@ pub use memory_registry::MemoryRegistryClient;
 pub use model_gateway::ModelGatewayClient;
 pub use model_settings::ModelSettingsClient;
 pub use online_evaluations::OnlineEvaluationsClient;
+pub use personal_channels::PersonalChannelsClient;
 pub use release_watches::ReleaseWatchesClient;
 pub use retention_policies::RetentionPoliciesClient;
 pub use review_queue::ReviewQueueClient;

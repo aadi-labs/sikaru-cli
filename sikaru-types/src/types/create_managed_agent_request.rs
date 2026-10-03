@@ -19,6 +19,9 @@ pub struct CreateManagedAgentRequest {
     #[serde(rename = "harnessId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub harness_id: Option<String>,
+    #[serde(rename = "initialChannel")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_channel: Option<CreateManagedAgentRequestInitialChannel>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<CreateManagedAgentSourceRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -39,6 +42,7 @@ pub struct CreateManagedAgentRequestBuilder {
     compatibility_profile_id: Option<String>,
     display_name: Option<String>,
     harness_id: Option<String>,
+    initial_channel: Option<CreateManagedAgentRequestInitialChannel>,
     source: Option<CreateManagedAgentSourceRequest>,
     status: Option<CreateManagedAgentRequestStatus>,
 }
@@ -69,6 +73,11 @@ impl CreateManagedAgentRequestBuilder {
         self
     }
 
+    pub fn initial_channel(mut self, value: CreateManagedAgentRequestInitialChannel) -> Self {
+        self.initial_channel = Some(value);
+        self
+    }
+
     pub fn source(mut self, value: CreateManagedAgentSourceRequest) -> Self {
         self.source = Some(value);
         self
@@ -89,6 +98,7 @@ impl CreateManagedAgentRequestBuilder {
             compatibility_profile_id: self.compatibility_profile_id,
             display_name: self.display_name,
             harness_id: self.harness_id,
+            initial_channel: self.initial_channel,
             source: self.source,
             status: self.status,
         })

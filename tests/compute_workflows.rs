@@ -70,7 +70,9 @@ mod workflow {
             if path.ends_with("/execution-sessions") {
                 s.sessions += 1;
                 s.models.push(body["model"].clone());
-                return ok(json!({"session":{"id":format!("session-{}",s.sessions)}}));
+                return ok(json!({"session":{"id":format!("session-{}",s.sessions),
+                    "projectId":"project","harnessId":"agent","harnessVersionId":"version",
+                    "createdAt":"2026-10-01T00:00:00Z","nextTurn":0}}));
             }
             if path.ends_with("/compute-environments") {
                 return self.environment(&mut s, &body);
@@ -94,7 +96,11 @@ mod workflow {
                 if self.scenario == "completedresume" {
                     s.receipts = 0;
                 }
-                return ok(json!({"run":{"id":self.run_id(&s)}}));
+                return ok(json!({"input":{"id":"input","idempotencyKey":body["idempotency_key"],
+                    "mode":"immediate","status":"accepted","runId":self.run_id(&s)},
+                    "run":{"id":self.run_id(&s),"inputId":"input",
+                        "sessionId":format!("session-{}",s.sessions),"status":"queued",
+                        "harnessVersionId":"version","traceId":null}}));
             }
             if path.ends_with("/events") {
                 return ok(

@@ -1,7 +1,6 @@
 use crate::api::*;
 use crate::{ApiError, ClientConfig, HttpClient, QueryBuilder, RequestOptions};
 use reqwest::Method;
-use std::collections::HashMap;
 
 pub struct RunSchedulesClient {
     pub http_client: HttpClient,
@@ -43,7 +42,18 @@ impl RunSchedulesClient {
         project_id: &str,
         request: &ListSchedulesQueryRequest,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<ScheduleList, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -51,6 +61,7 @@ impl RunSchedulesClient {
                 None,
                 QueryBuilder::new()
                     .serialize("session_id", request.session_id.clone())
+                    .serialize("agent_slug", request.agent_slug.clone())
                     .build(),
                 options,
             )
@@ -75,10 +86,12 @@ impl RunSchedulesClient {
     ///             &"project_id".to_string(),
     ///             &ScheduleInput {
     ///                 input: HashMap::from([("key".to_string(), serde_json::json!("value"))]),
-    ///                 session_id: "session_id".to_string(),
+    ///                 agent_slug: None,
     ///                 cron: None,
+    ///                 environment: None,
     ///                 idempotency_key: None,
     ///                 interval_seconds: None,
+    ///                 session_id: None,
     ///                 session_mode: None,
     ///                 timezone: None,
     ///             },
@@ -92,9 +105,16 @@ impl RunSchedulesClient {
         project_id: &str,
         request: &ScheduleInput,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<ScheduleResponse, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -132,9 +152,16 @@ impl RunSchedulesClient {
         project_id: &str,
         schedule_id: &str,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<ScheduleDeleted, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -178,9 +205,16 @@ impl RunSchedulesClient {
         schedule_id: &str,
         request: &PauseInput,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<SchedulePaused, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -189,6 +223,55 @@ impl RunSchedulesClient {
                 Method::PATCH,
                 &format!("v1/projects/{}/run-schedules/{}", project_id, schedule_id),
                 Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .run_schedules
+    ///         .schedule_notices(&"project_id".to_string(), &"schedule_id".to_string(), None)
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn schedule_notices(
+        &self,
+        project_id: &str,
+        schedule_id: &str,
+        options: Option<RequestOptions>,
+    ) -> Result<ScheduleNotices, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::GET,
+                &format!(
+                    "v1/projects/{}/run-schedules/{}/notices",
+                    project_id, schedule_id
+                ),
+                None,
                 None,
                 options,
             )
@@ -226,7 +309,18 @@ impl RunSchedulesClient {
         schedule_id: &str,
         request: &ScheduleHistoryQueryRequest,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<ScheduleHistory, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,

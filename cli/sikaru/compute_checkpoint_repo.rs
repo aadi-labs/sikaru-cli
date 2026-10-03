@@ -15,8 +15,8 @@ pub const FILE: u32 = 0o100644;
 pub const EXECUTABLE: u32 = 0o100755;
 pub const LINK: u32 = 0o120000;
 pub const GITLINK: u32 = 0o160000;
-const SEED_REF: &str = "refs/sikaru/seed";
-const SEED_BYTES: &str = "sikaru.seedBytes";
+/// The remote stores at most 32 MB per blob, whatever the pack budget allows.
+const MAX_BLOB_BYTES: u64 = 32_000_000;
 const AUTHOR: &str = "Sikaru <checkpoints@sikaru.invalid>";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,7 +37,6 @@ pub struct Staged {
 pub struct Chain {
     pub commits: Vec<Oid>,
     pub parent: Option<Oid>,
-    pub history: bool,
     pub skipped: Vec<Skipped>,
 }
 pub struct Pack {
@@ -75,7 +74,7 @@ impl PrivateRepo {
     ) -> Result<Self> {
         cancellation.check()?;
         if !git_dir.join("HEAD").is_file() {
-            init(git_dir, workspace, &cancellation)?;
+            init(git_dir, &cancellation)?;
         }
         cancellation.check()?;
         let mut repo = Self::open(git_dir, workspace)?;
@@ -195,76 +194,39 @@ impl PrivateRepo {
         }
         Ok((self.repo.status_should_ignore(Path::new(path))?, None))
     }
-    pub fn seed(&self) -> Option<Oid> {
-        self.repo.refname_to_id(SEED_REF).ok()
-    }
-    fn seed_bytes(&self) -> u64 {
-        self.repo
-            .config()
-            .and_then(|c| c.get_i64(SEED_BYTES))
-            .map_or(u64::MAX, |n| n.max(0) as u64)
-    }
     pub fn has_commit(&self, oid: Oid) -> bool {
         self.repo.find_commit(oid).is_ok()
     }
     pub fn chain(
         &self,
         head: Option<Oid>,
-        remote_has: &[Oid],
         target: Oid,
         budget: u64,
         message: &str,
     ) -> Result<Chain> {
         self.cancellation.check()?;
         anyhow::ensure!(budget >= 512, "checkpoint pack budget is too small");
-        let seeded = self.select_seed(head, remote_has, budget)?;
-        let parent = head.or(seeded);
-        let base = parent
+        let base = head
             .and_then(|p| self.repo.find_commit(p).ok())
             .map(|c| c.tree())
             .transpose()?;
         let mut chain = Chain {
             commits: Vec::new(),
-            parent,
-            history: seeded.is_some(),
+            parent: head,
             skipped: Vec::new(),
         };
         let (mut index, changes) =
             self.changes(base.as_ref(), target, budget, &mut chain.skipped)?;
-        let mut hide = remote_has.to_vec();
-        if let Some(head) = head {
-            hide.push(head);
-        }
         let context = Packing {
             budget,
             message,
-            hide,
+            hide: head.into_iter().collect(),
         };
         for batch in batches(changes, budget / 2) {
             self.append_batch(&mut index, &batch, &context, &mut chain)?;
         }
         self.append_final_tree(&mut index, &context, &mut chain)?;
         Ok(chain)
-    }
-    fn select_seed(
-        &self,
-        head: Option<Oid>,
-        remote_has: &[Oid],
-        budget: u64,
-    ) -> Result<Option<Oid>> {
-        if head.is_some() {
-            return Ok(None);
-        }
-        let Some(seed) = self.seed() else {
-            return Ok(None);
-        };
-        if remote_has.contains(&seed) {
-            return Ok(Some(seed));
-        }
-        if self.seed_bytes() > budget / 2 {
-            return Ok(None);
-        }
-        Ok((self.pack(seed, &[])?.bytes.len() as u64 <= budget / 2).then_some(seed))
     }
     fn changes(
         &self,
@@ -299,7 +261,7 @@ impl PrivateRepo {
     ) -> Result<Option<Change>> {
         self.cancellation.check()?;
         let size = self.repo.odb()?.read_header(id)?.0 as u64;
-        if size > budget {
+        if size > budget.min(MAX_BLOB_BYTES) {
             skipped.push(Skipped {
                 path,
                 reason: SkipReason::TooLarge,
@@ -365,8 +327,7 @@ impl PrivateRepo {
         let unchanged = parent
             .and_then(|p| self.repo.find_commit(p).ok())
             .is_some_and(|p| p.tree_id() == tree);
-        // An unborn branch always needs a checkpoint child, even if its seed tree is unchanged.
-        if unchanged && (!chain.commits.is_empty() || !chain.history) {
+        if unchanged {
             return Ok(());
         }
         anyhow::ensure!(
@@ -509,7 +470,7 @@ impl PrivateRepo {
     }
 }
 
-fn init(git_dir: &Path, workspace: &Path, cancellation: &Cancellation) -> Result<()> {
+fn init(git_dir: &Path, cancellation: &Cancellation) -> Result<()> {
     cancellation.check()?;
     let staging = git_dir.with_extension("init");
     let _ = std::fs::remove_dir_all(&staging);
@@ -518,9 +479,6 @@ fn init(git_dir: &Path, workspace: &Path, cancellation: &Cancellation) -> Result
     let repo = Repository::init_opts(&staging, &options)?;
     let mut config = repo.config()?.open_level(ConfigLevel::Local)?;
     configure_private_repository(&mut config)?;
-    if let Some(seed) = task_seed(workspace, cancellation) {
-        install_seed(&staging, &mut config, seed)?;
-    }
     cancellation.check()?;
     std::fs::rename(&staging, git_dir)?;
     Ok(())
@@ -533,59 +491,6 @@ fn configure_private_repository(config: &mut git2::Config) -> Result<()> {
     config.set_str("core.excludesfile", "/dev/null")?;
     config.set_str("core.attributesfile", "/dev/null")?;
     Ok(())
-}
-fn install_seed(staging: &Path, config: &mut git2::Config, seed: Seed) -> Result<()> {
-    std::fs::write(
-        staging.join("objects/info/alternates"),
-        format!("{}\n", seed.objects.display()),
-    )?;
-    config.set_i64(SEED_BYTES, seed.bytes as i64)?;
-    Repository::open_bare(staging)?.reference(SEED_REF, seed.head, true, "task HEAD at start")?;
-    Ok(())
-}
-struct Seed {
-    head: Oid,
-    objects: PathBuf,
-    bytes: u64,
-}
-/// The workspace's own HEAD, when the workspace is exactly a repository's full-history work tree.
-fn task_seed(workspace: &Path, cancellation: &Cancellation) -> Option<Seed> {
-    let task = Repository::open_ext(
-        workspace,
-        git2::RepositoryOpenFlags::NO_SEARCH,
-        std::iter::empty::<&std::ffi::OsStr>(),
-    )
-    .ok()?;
-    let root = task.workdir()?.canonicalize().ok()?;
-    if root != workspace.canonicalize().ok()? || task.is_shallow() {
-        return None;
-    }
-    let head = task.head().ok()?.peel_to_commit().ok()?.id();
-    let objects = task.commondir().join("objects");
-    Some(Seed {
-        head,
-        bytes: dir_bytes(&objects, cancellation).ok()?,
-        objects,
-    })
-}
-fn dir_bytes(path: &Path, cancellation: &Cancellation) -> Result<u64> {
-    cancellation.check()?;
-    let Ok(entries) = std::fs::read_dir(path) else {
-        return Ok(0);
-    };
-    let mut total = 0;
-    for entry in entries.flatten() {
-        cancellation.check()?;
-        total += entry_bytes(&entry, cancellation)?;
-    }
-    Ok(total)
-}
-fn entry_bytes(entry: &std::fs::DirEntry, cancellation: &Cancellation) -> Result<u64> {
-    match entry.file_type() {
-        Ok(kind) if kind.is_dir() => dir_bytes(&entry.path(), cancellation),
-        Ok(kind) if kind.is_file() => Ok(entry.metadata().map_or(0, |m| m.len())),
-        _ => Ok(0),
-    }
 }
 fn entries(
     tree: Option<&Tree>,

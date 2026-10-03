@@ -10,6 +10,9 @@ pub struct TranscriptRun {
     #[serde(rename = "completedAt")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
+    #[serde(rename = "contentVisible")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_visible: Option<bool>,
     #[serde(rename = "conversationId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
@@ -21,6 +24,8 @@ pub struct TranscriptRun {
     pub id: String,
     #[serde(default)]
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal: Option<bool>,
     #[serde(rename = "sessionId")]
     #[serde(default)]
     pub session_id: String,
@@ -45,11 +50,13 @@ impl TranscriptRun {
 pub struct TranscriptRunBuilder {
     account_id: Option<String>,
     completed_at: Option<String>,
+    content_visible: Option<bool>,
     conversation_id: Option<String>,
     environment: Option<TranscriptRunEnvironment>,
     harness_version_id: Option<String>,
     id: Option<String>,
     name: Option<String>,
+    personal: Option<bool>,
     session_id: Option<String>,
     started_at: Option<String>,
     status: Option<String>,
@@ -64,6 +71,11 @@ impl TranscriptRunBuilder {
 
     pub fn completed_at(mut self, value: impl Into<String>) -> Self {
         self.completed_at = Some(value.into());
+        self
+    }
+
+    pub fn content_visible(mut self, value: bool) -> Self {
+        self.content_visible = Some(value);
         self
     }
 
@@ -89,6 +101,11 @@ impl TranscriptRunBuilder {
 
     pub fn name(mut self, value: impl Into<String>) -> Self {
         self.name = Some(value.into());
+        self
+    }
+
+    pub fn personal(mut self, value: bool) -> Self {
+        self.personal = Some(value);
         self
     }
 
@@ -126,11 +143,13 @@ impl TranscriptRunBuilder {
         Ok(TranscriptRun {
             account_id: self.account_id.ok_or_else(|| BuildError::missing_field("account_id"))?,
             completed_at: self.completed_at,
+            content_visible: self.content_visible,
             conversation_id: self.conversation_id,
             environment: self.environment.ok_or_else(|| BuildError::missing_field("environment"))?,
             harness_version_id: self.harness_version_id.ok_or_else(|| BuildError::missing_field("harness_version_id"))?,
             id: self.id.ok_or_else(|| BuildError::missing_field("id"))?,
             name: self.name.ok_or_else(|| BuildError::missing_field("name"))?,
+            personal: self.personal,
             session_id: self.session_id.ok_or_else(|| BuildError::missing_field("session_id"))?,
             started_at: self.started_at.ok_or_else(|| BuildError::missing_field("started_at"))?,
             status: self.status.ok_or_else(|| BuildError::missing_field("status"))?,

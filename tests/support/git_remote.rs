@@ -7,7 +7,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-pub const IGNORE_DEFAULTS: [&str; 21] = [
+pub const IGNORE_DEFAULTS: &[&str] = &[
     "node_modules/",
     ".git/",
     ".venv/",
@@ -29,6 +29,33 @@ pub const IGNORE_DEFAULTS: [&str; 21] = [
     "coverage/",
     ".coverage",
     "*.egg-info/",
+    ".env",
+    ".env.*",
+    "!.env.example",
+    "!.env.sample",
+    "!.env.template",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*.jks",
+    "*.keystore",
+    "*.tfvars",
+    "*.tfstate",
+    "*.tfstate.*",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    ".netrc",
+    ".pgpass",
+    ".git-credentials",
+    ".pypirc",
+    ".ssh/",
+    ".aws/",
+    ".gnupg/",
+    ".docker/config.json",
+    ".kube/config",
 ];
 
 pub fn ignore_defaults() -> Vec<String> {
@@ -144,6 +171,9 @@ pub fn task_repository(ws: &Path) {
     std::fs::write(ws.join("staged.txt"), "staged").unwrap();
     git(ws, &["add", "staged.txt"]);
     std::fs::write(ws.join("app.log"), "ignored").unwrap();
+    std::fs::write(ws.join(".env"), "TOKEN=secret").unwrap();
+    std::fs::write(ws.join(".env.example"), "TOKEN=").unwrap();
+    std::fs::write(ws.join("deploy.pem"), "-----BEGIN PRIVATE KEY-----").unwrap();
     std::fs::create_dir_all(ws.join(".venv/lib")).unwrap();
     std::fs::write(ws.join(".venv/lib/site.py"), "environment").unwrap();
     std::fs::write(ws.join("run.sh"), "#!/bin/sh\n").unwrap();

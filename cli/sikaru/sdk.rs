@@ -62,12 +62,16 @@ pub fn client(ctx: &AppContext) -> sikaru_sdk::api::ApiClient {
     );
     sikaru_sdk::api::ApiClient {
         config,
+        auth: sikaru_sdk::api::AuthClient { http_client: http_client.clone() },
+        http_channels: sikaru_sdk::api::HttpChannelsClient { http_client: http_client.clone() },
+        personal_channels: sikaru_sdk::api::PersonalChannelsClient { http_client: http_client.clone() },
         activation: sikaru_sdk::api::ActivationClient { http_client: http_client.clone() },
         agent_documents: sikaru_sdk::api::AgentDocumentsClient { http_client: http_client.clone() },
         agent_imports: sikaru_sdk::api::AgentImportsClient { http_client: http_client.clone() },
         agents: sikaru_sdk::api::AgentsClient { http_client: http_client.clone() },
         capability_ceilings: sikaru_sdk::api::CapabilityCeilingsClient { http_client: http_client.clone() },
         changesets: sikaru_sdk::api::ChangesetsClient { http_client: http_client.clone() },
+        channels: sikaru_sdk::api::ChannelsClient { http_client: http_client.clone() },
         compute_attachments: sikaru_sdk::api::ComputeAttachmentsClient { http_client: http_client.clone() },
         compute_operations: sikaru_sdk::api::ComputeOperationsClient { http_client: http_client.clone() },
         compute_workspaces: sikaru_sdk::api::ComputeWorkspacesClient { http_client: http_client.clone() },

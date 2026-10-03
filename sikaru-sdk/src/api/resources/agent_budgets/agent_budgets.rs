@@ -37,6 +37,17 @@ impl AgentBudgetsClient {
         harness_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<AgentBudget, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -82,8 +93,15 @@ impl AgentBudgetsClient {
         request: &ReloadInput,
         options: Option<RequestOptions>,
     ) -> Result<AgentBudget, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -134,8 +152,15 @@ impl AgentBudgetsClient {
         request: &FundingInput,
         options: Option<RequestOptions>,
     ) -> Result<FundingReceipt, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -185,8 +210,15 @@ impl AgentBudgetsClient {
         request: &SetupInput,
         options: Option<RequestOptions>,
     ) -> Result<PaymentSetupLink, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };

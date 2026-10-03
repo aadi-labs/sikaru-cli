@@ -25,8 +25,6 @@ pub enum PushOutcome {
 #[derive(Debug)]
 pub struct Advertisement {
     pub head: Option<String>,
-    /// Commits the remote already has on other branches; packs may omit their objects.
-    pub haves: Vec<String>,
 }
 pub struct Remote<'a> {
     pub http: &'a reqwest::Client,
@@ -171,10 +169,7 @@ fn advertised_lines(body: &[u8]) -> Result<Vec<Option<&[u8]>>> {
     Ok(lines)
 }
 pub fn parse_advertisement(body: &[u8], refname: &str) -> Result<Advertisement> {
-    let mut advertised = Advertisement {
-        head: None,
-        haves: Vec::new(),
-    };
+    let mut advertised = Advertisement { head: None };
     for packet in advertised_lines(body)? {
         let text = line_text(packet.ok_or(GitHttpError::Protocol)?)?;
         let (oid, name) = text.split_once(' ').ok_or(GitHttpError::Protocol)?;
@@ -194,15 +189,8 @@ fn add_advertised_ref(
     if oid == ZERO {
         return Ok(());
     }
-    if name == refname {
-        if advertised.head.replace(oid.to_owned()).is_some() {
-            bail!(GitHttpError::Protocol);
-        }
-    } else if name == ".have" {
-        if advertised.haves.len() >= 256 {
-            bail!(GitHttpError::Protocol);
-        }
-        advertised.haves.push(oid.to_owned());
+    if name == refname && advertised.head.replace(oid.to_owned()).is_some() {
+        bail!(GitHttpError::Protocol);
     }
     Ok(())
 }

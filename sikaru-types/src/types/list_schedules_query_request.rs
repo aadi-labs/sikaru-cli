@@ -7,6 +7,8 @@ use super::*;
 pub struct ListSchedulesQueryRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_slug: Option<String>,
 }
 
 impl ListSchedulesQueryRequest {
@@ -19,6 +21,7 @@ impl ListSchedulesQueryRequest {
 #[non_exhaustive]
 pub struct ListSchedulesQueryRequestBuilder {
     session_id: Option<String>,
+    agent_slug: Option<String>,
 }
 
 impl ListSchedulesQueryRequestBuilder {
@@ -27,10 +30,16 @@ impl ListSchedulesQueryRequestBuilder {
         self
     }
 
+    pub fn agent_slug(mut self, value: impl Into<String>) -> Self {
+        self.agent_slug = Some(value.into());
+        self
+    }
+
     /// Consumes the builder and constructs a [`ListSchedulesQueryRequest`].
     pub fn build(self) -> Result<ListSchedulesQueryRequest, BuildError> {
         Ok(ListSchedulesQueryRequest {
             session_id: self.session_id,
+            agent_slug: self.agent_slug,
         })
     }
 }

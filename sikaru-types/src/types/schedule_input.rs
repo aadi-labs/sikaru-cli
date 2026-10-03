@@ -5,15 +5,19 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct ScheduleInput {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_slug: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cron: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<ScheduleInputEnvironment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
     #[serde(default)]
     pub input: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interval_seconds: Option<i64>,
-    #[serde(default)]
-    pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_mode: Option<ScheduleInputSessionMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -29,7 +33,9 @@ impl ScheduleInput {
 #[derive(Clone, PartialEq, Default, Debug)]
 #[non_exhaustive]
 pub struct ScheduleInputBuilder {
+    agent_slug: Option<String>,
     cron: Option<String>,
+    environment: Option<ScheduleInputEnvironment>,
     idempotency_key: Option<String>,
     input: Option<HashMap<String, serde_json::Value>>,
     interval_seconds: Option<i64>,
@@ -39,8 +45,18 @@ pub struct ScheduleInputBuilder {
 }
 
 impl ScheduleInputBuilder {
+    pub fn agent_slug(mut self, value: impl Into<String>) -> Self {
+        self.agent_slug = Some(value.into());
+        self
+    }
+
     pub fn cron(mut self, value: impl Into<String>) -> Self {
         self.cron = Some(value.into());
+        self
+    }
+
+    pub fn environment(mut self, value: ScheduleInputEnvironment) -> Self {
+        self.environment = Some(value);
         self
     }
 
@@ -77,14 +93,15 @@ impl ScheduleInputBuilder {
     /// Consumes the builder and constructs a [`ScheduleInput`].
     /// This method will fail if any of the following fields are not set:
     /// - [`input`](ScheduleInputBuilder::input)
-    /// - [`session_id`](ScheduleInputBuilder::session_id)
     pub fn build(self) -> Result<ScheduleInput, BuildError> {
         Ok(ScheduleInput {
+            agent_slug: self.agent_slug,
             cron: self.cron,
+            environment: self.environment,
             idempotency_key: self.idempotency_key,
             input: self.input.ok_or_else(|| BuildError::missing_field("input"))?,
             interval_seconds: self.interval_seconds,
-            session_id: self.session_id.ok_or_else(|| BuildError::missing_field("session_id"))?,
+            session_id: self.session_id,
             session_mode: self.session_mode,
             timezone: self.timezone,
         })

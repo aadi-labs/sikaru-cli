@@ -37,6 +37,17 @@ impl ManagedAgentsClient {
         project_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -70,6 +81,7 @@ impl ManagedAgentsClient {
     ///                 compatibility_profile_id: None,
     ///                 display_name: None,
     ///                 harness_id: None,
+    ///                 initial_channel: None,
     ///                 source: None,
     ///                 status: None,
     ///             },
@@ -84,8 +96,15 @@ impl ManagedAgentsClient {
         request: &CreateManagedAgentRequest,
         options: Option<RequestOptions>,
     ) -> Result<CreatedManagedAgent, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -93,6 +112,128 @@ impl ManagedAgentsClient {
             .execute_request(
                 Method::POST,
                 &format!("v1/projects/{}/managed-agents", project_id),
+                Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// Delete an agent that has never gone live, with its drafts, checks and schedules.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// Empty response
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .managed_agents
+    ///         .delete_managed_agent(&"project_id".to_string(), &"agent_slug".to_string(), None)
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn delete_managed_agent(
+        &self,
+        project_id: &str,
+        agent_slug: &str,
+        options: Option<RequestOptions>,
+    ) -> Result<(), ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::DELETE,
+                &format!("v1/projects/{}/managed-agents/{}", project_id, agent_slug),
+                None,
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// Change the agent's display name. The slug and every reference to the agent stay the same.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .managed_agents
+    ///         .rename_managed_agent(
+    ///             &"project_id".to_string(),
+    ///             &"agent_slug".to_string(),
+    ///             &RenameAgent {
+    ///                 display_name: "displayName".to_string(),
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn rename_managed_agent(
+        &self,
+        project_id: &str,
+        agent_slug: &str,
+        request: &RenameAgent,
+        options: Option<RequestOptions>,
+    ) -> Result<RenamedManagedAgent, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::PATCH,
+                &format!("v1/projects/{}/managed-agents/{}", project_id, agent_slug),
                 Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
                 None,
                 options,
@@ -154,8 +295,15 @@ impl ManagedAgentsClient {
         request: &DefinitionRevisionRequest,
         options: Option<RequestOptions>,
     ) -> Result<DefinitionRevisionResult, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -203,6 +351,17 @@ impl ManagedAgentsClient {
         changeset_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<DefinitionRevisionView, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,

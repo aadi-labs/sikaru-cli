@@ -13,6 +13,69 @@ impl AgentDocumentsClient {
         })
     }
 
+    /// Draft a first agent document, starter checks and suggested apps from a description or past conversations.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .agent_documents
+    ///         .draft(
+    ///             &"project_id".to_string(),
+    ///             &DraftDocumentInput {
+    ///                 ..Default::default()
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn draft(
+        &self,
+        project_id: &str,
+        request: &DraftDocumentInput,
+        options: Option<RequestOptions>,
+    ) -> Result<AgentDocumentDraft, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::POST,
+                &format!("v1/projects/{}/agent-documents/draft", project_id),
+                Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
+                None,
+                options,
+            )
+            .await
+    }
+
     /// # Examples
     ///
     /// ```no_run
@@ -43,8 +106,15 @@ impl AgentDocumentsClient {
         request: &ImportDocumentFiles,
         options: Option<RequestOptions>,
     ) -> Result<ImportedDocument, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -82,11 +152,88 @@ impl AgentDocumentsClient {
         project_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<DocumentResources, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
                 &format!("v1/projects/{}/agent-documents/resources", project_id),
                 None,
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// Set or remove one setting without rewriting the rest of the document.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .agent_documents
+    ///         .edit_setting(
+    ///             &"project_id".to_string(),
+    ///             &EditDocumentSetting {
+    ///                 document: "document".to_string(),
+    ///                 path: vec!["path".to_string()],
+    ///                 op: None,
+    ///                 value: None,
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn edit_setting(
+        &self,
+        project_id: &str,
+        request: &EditDocumentSetting,
+        options: Option<RequestOptions>,
+    ) -> Result<ImportedDocument, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::POST,
+                &format!("v1/projects/{}/agent-documents/settings", project_id),
+                Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
                 None,
                 options,
             )
@@ -116,11 +263,76 @@ impl AgentDocumentsClient {
         project_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<DocumentTemplates, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
                 &format!("v1/projects/{}/agent-documents/templates", project_id),
                 None,
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .agent_documents
+    ///         .validate_text(
+    ///             &"project_id".to_string(),
+    ///             &DocumentInput {
+    ///                 document: "document".to_string(),
+    ///                 ..Default::default()
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn validate_text(
+        &self,
+        project_id: &str,
+        request: &DocumentInput,
+        options: Option<RequestOptions>,
+    ) -> Result<DocumentValidationView, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::POST,
+                &format!("v1/projects/{}/agent-documents/validate", project_id),
+                Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
                 None,
                 options,
             )
@@ -151,6 +363,17 @@ impl AgentDocumentsClient {
         agent_slug: &str,
         options: Option<RequestOptions>,
     ) -> Result<AgentDocument, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -198,8 +421,15 @@ impl AgentDocumentsClient {
         request: &SaveDocument,
         options: Option<RequestOptions>,
     ) -> Result<AgentDocument, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -241,6 +471,17 @@ impl AgentDocumentsClient {
         agent_slug: &str,
         options: Option<RequestOptions>,
     ) -> Result<DocumentComparison, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -288,8 +529,15 @@ impl AgentDocumentsClient {
         request: &DiscardDocument,
         options: Option<RequestOptions>,
     ) -> Result<AgentDocument, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -328,6 +576,7 @@ impl AgentDocumentsClient {
     ///                 revision: 1,
     ///                 acknowledge_removals: None,
     ///                 acknowledge_widening: None,
+    ///                 expected_access_digest: None,
     ///                 expected_live_version_id: None,
     ///             },
     ///             None,
@@ -342,8 +591,15 @@ impl AgentDocumentsClient {
         request: &PublishDocument,
         options: Option<RequestOptions>,
     ) -> Result<DocumentPublication, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -383,6 +639,7 @@ impl AgentDocumentsClient {
     ///                 revision: 1,
     ///                 acknowledge_removals: None,
     ///                 acknowledge_widening: None,
+    ///                 expected_access_digest: None,
     ///                 expected_live_version_id: None,
     ///             },
     ///             None,
@@ -397,8 +654,15 @@ impl AgentDocumentsClient {
         request: &RevertDocument,
         options: Option<RequestOptions>,
     ) -> Result<DocumentPublication, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -407,6 +671,69 @@ impl AgentDocumentsClient {
                 Method::POST,
                 &format!(
                     "v1/projects/{}/managed-agents/{}/document/revert",
+                    project_id, agent_slug
+                ),
+                Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .agent_documents
+    ///         .review(
+    ///             &"project_id".to_string(),
+    ///             &"agent_slug".to_string(),
+    ///             &ReviewDocument {
+    ///                 revision: 1,
+    ///                 acknowledge_removals: None,
+    ///                 acknowledge_widening: None,
+    ///                 expected_access_digest: None,
+    ///                 expected_live_version_id: None,
+    ///                 harness_version_id: None,
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn review(
+        &self,
+        project_id: &str,
+        agent_slug: &str,
+        request: &ReviewDocument,
+        options: Option<RequestOptions>,
+    ) -> Result<DocumentReview, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::POST,
+                &format!(
+                    "v1/projects/{}/managed-agents/{}/document/review",
                     project_id, agent_slug
                 ),
                 Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
@@ -440,6 +767,17 @@ impl AgentDocumentsClient {
         agent_slug: &str,
         options: Option<RequestOptions>,
     ) -> Result<AgentSnippets, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -478,6 +816,17 @@ impl AgentDocumentsClient {
         agent_slug: &str,
         options: Option<RequestOptions>,
     ) -> Result<DocumentSuggestions, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -526,8 +875,15 @@ impl AgentDocumentsClient {
         request: &AdoptSuggestion,
         options: Option<RequestOptions>,
     ) -> Result<AgentDocument, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -575,8 +931,15 @@ impl AgentDocumentsClient {
         suggestion_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<DocumentSuggestion, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -613,6 +976,7 @@ impl AgentDocumentsClient {
     ///             &"agent_slug".to_string(),
     ///             &DocumentInput {
     ///                 document: "document".to_string(),
+    ///                 ..Default::default()
     ///             },
     ///             None,
     ///         )
@@ -626,8 +990,15 @@ impl AgentDocumentsClient {
         request: &DocumentInput,
         options: Option<RequestOptions>,
     ) -> Result<DocumentValidationView, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -669,6 +1040,17 @@ impl AgentDocumentsClient {
         agent_slug: &str,
         options: Option<RequestOptions>,
     ) -> Result<DocumentVersions, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,

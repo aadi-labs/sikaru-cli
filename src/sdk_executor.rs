@@ -74,6 +74,17 @@ pub struct CliExecutor {
     sensitive_headers: Vec<String>,
 }
 
+fn delegated_endpoint(headers: &reqwest::header::HeaderMap) -> Result<EndpointAuthMetadata, SdkError> {
+    let Some(value) = headers.get("x-fern-sdk-auth-requirements") else {
+        return Ok(EndpointAuthMetadata::unspecified());
+    };
+    let groups: Vec<Vec<String>> = serde_json::from_slice(value.as_bytes())
+        .map_err(|_| SdkError::Auth("Invalid delegated endpoint policy".into()))?;
+    Ok(EndpointAuthMetadata::with_requirements(groups.into_iter()
+        .map(|group| group.into_iter().map(|name| (name, Vec::new())).collect())
+        .collect()))
+}
+
 impl CliExecutor {
     /// Create a new executor wired to the CLI's runtime context.
     ///
@@ -263,6 +274,7 @@ impl CliExecutor {
     ) -> Result<reqwest::RequestBuilder, SdkError> {
         let mut builder = client.request(method.clone(), url.clone());
         for (name, value) in headers.iter() {
+            if name == "x-fern-sdk-auth-requirements" { continue; }
             builder = builder.header(name, value);
         }
         if let Some(body) = body_bytes {
@@ -272,7 +284,10 @@ impl CliExecutor {
         // Apply auth — ADR-0001: credentials stay inside apply().
         // Fail closed: if the provider returns an error, we surface it
         // rather than silently sending without credentials.
-        let endpoint = EndpointAuthMetadata::unspecified();
+        let endpoint = delegated_endpoint(headers)?;
+        if endpoint.security_requirements.is_some() && !self.auth_provider.has_credentials_for(&endpoint) {
+            return Err(SdkError::Auth("Missing credentials for SDK endpoint".into()));
+        }
         builder = match self.auth_provider.apply(builder, &endpoint) {
             Ok(b) => b,
             Err(e) => {

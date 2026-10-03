@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.13
+
+- Create managed agents with an initial HTTP or Slack channel, manage channel bindings, and inspect delivery status.
+- Invoke HTTP channels and poll their receipts using a channel credential, separately from the project API key.
+- Manage personal channel connections, approvals, files, and Slack identity links.
+- Edit individual agent document settings, review access, and rename managed agents.
+- Refresh typed session, schedule, and transcript responses, including transcript usage and memory policy settings.
+- Start new workspace checkpoint branches without copying task repository history, so ignored files from earlier commits are not uploaded. Skip files exceeding the checkpoint storage limit.
+- These features require an updated managed service.
+
 ## 0.2.12
 
 - Author agents as Markdown documents: pull and push drafts, validate access, review changes, publish with a reviewed access digest, and retrieve usage snippets.

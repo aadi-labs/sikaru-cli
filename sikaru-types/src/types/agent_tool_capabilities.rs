@@ -9,7 +9,7 @@ pub struct AgentToolCapabilities {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bash: Option<BuiltInToolSetting>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory: Option<BuiltInToolSetting>,
+    pub memory: Option<MemoryToolSetting>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub web_fetch: Option<BuiltInToolSetting>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -29,7 +29,7 @@ impl AgentToolCapabilities {
 pub struct AgentToolCapabilitiesBuilder {
     agents: Option<BuiltInToolSetting>,
     bash: Option<BuiltInToolSetting>,
-    memory: Option<BuiltInToolSetting>,
+    memory: Option<MemoryToolSetting>,
     web_fetch: Option<BuiltInToolSetting>,
     web_search: Option<BuiltInToolSetting>,
     workspace: Option<BuiltInToolSetting>,
@@ -46,7 +46,7 @@ impl AgentToolCapabilitiesBuilder {
         self
     }
 
-    pub fn memory(mut self, value: BuiltInToolSetting) -> Self {
+    pub fn memory(mut self, value: MemoryToolSetting) -> Self {
         self.memory = Some(value);
         self
     }

@@ -7,6 +7,7 @@ use super::*;
 pub enum RunTranscriptEvidence {
     RetainedSnapshot,
     Unavailable,
+    Personal,
     /// This variant is used for forward compatibility.
     /// If the server sends a value not recognized by the current SDK version,
     /// it will be captured here with the raw string value.
@@ -17,6 +18,7 @@ impl Serialize for RunTranscriptEvidence {
         match self {
             Self::RetainedSnapshot => serializer.serialize_str("retained_snapshot"),
             Self::Unavailable => serializer.serialize_str("unavailable"),
+            Self::Personal => serializer.serialize_str("personal"),
             Self::__Unknown(val) => serializer.serialize_str(val),
         }
     }
@@ -28,6 +30,7 @@ impl<'de> Deserialize<'de> for RunTranscriptEvidence {
         match value.as_str() {
             "retained_snapshot" => Ok(Self::RetainedSnapshot),
             "unavailable" => Ok(Self::Unavailable),
+            "personal" => Ok(Self::Personal),
             _ => Ok(Self::__Unknown(value)),
         }
     }
@@ -38,6 +41,7 @@ impl fmt::Display for RunTranscriptEvidence {
         match self {
             Self::RetainedSnapshot => write!(f, "retained_snapshot"),
             Self::Unavailable => write!(f, "unavailable"),
+            Self::Personal => write!(f, "personal"),
             Self::__Unknown(val) => write!(f, "{}", val),
         }
     }

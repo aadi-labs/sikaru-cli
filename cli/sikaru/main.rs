@@ -7,11 +7,12 @@ mod sdk;
 
 use fern_cli_sdk::app::CliApp;
 use fern_cli_sdk::openapi::OpenApiBinding;
-use fern_cli_sdk::auth::{BearerAuth};
+use fern_cli_sdk::auth::{ApiKeyAuth, AuthCredentialSource, BearerAuth};
 
 fn main() {
     let app = CliApp::new("sikaru")
         .auth(BearerAuth::new("BearerAuth").env("SIKARU_API_KEY"))
+        .auth(ApiKeyAuth::new("BindingBearerAuth").source(AuthCredentialSource::any(vec![AuthCredentialSource::cli("binding-bearer-auth"), AuthCredentialSource::from_env("SIKARU_CHANNEL_CREDENTIAL")])))
         .binding(
             OpenApiBinding::new()
                 .commands(commands::description())

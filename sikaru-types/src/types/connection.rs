@@ -4,6 +4,8 @@ use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct Connection {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_status: Option<String>,
     #[serde(default)]
     pub config: ConnectionConfig,
     #[serde(default)]
@@ -43,6 +45,7 @@ impl Connection {
 #[derive(Clone, PartialEq, Default, Debug)]
 #[non_exhaustive]
 pub struct ConnectionBuilder {
+    account_status: Option<String>,
     config: Option<ConnectionConfig>,
     display_name: Option<String>,
     expires_at: Option<f64>,
@@ -60,6 +63,11 @@ pub struct ConnectionBuilder {
 }
 
 impl ConnectionBuilder {
+    pub fn account_status(mut self, value: impl Into<String>) -> Self {
+        self.account_status = Some(value.into());
+        self
+    }
+
     pub fn config(mut self, value: ConnectionConfig) -> Self {
         self.config = Some(value);
         self
@@ -146,6 +154,7 @@ impl ConnectionBuilder {
     /// - [`version`](ConnectionBuilder::version)
     pub fn build(self) -> Result<Connection, BuildError> {
         Ok(Connection {
+            account_status: self.account_status,
             config: self.config.ok_or_else(|| BuildError::missing_field("config"))?,
             display_name: self.display_name.ok_or_else(|| BuildError::missing_field("display_name"))?,
             expires_at: self.expires_at,

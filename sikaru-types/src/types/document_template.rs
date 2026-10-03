@@ -4,6 +4,11 @@ use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct DocumentTemplate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checks: Option<Vec<StarterCheck>>,
+    /// Toolkit slugs this template works best with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connectors: Option<Vec<String>>,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -23,6 +28,8 @@ impl DocumentTemplate {
 #[derive(Clone, PartialEq, Default, Debug)]
 #[non_exhaustive]
 pub struct DocumentTemplateBuilder {
+    checks: Option<Vec<StarterCheck>>,
+    connectors: Option<Vec<String>>,
     description: Option<String>,
     document: Option<String>,
     id: Option<String>,
@@ -30,6 +37,16 @@ pub struct DocumentTemplateBuilder {
 }
 
 impl DocumentTemplateBuilder {
+    pub fn checks(mut self, value: Vec<StarterCheck>) -> Self {
+        self.checks = Some(value);
+        self
+    }
+
+    pub fn connectors(mut self, value: Vec<String>) -> Self {
+        self.connectors = Some(value);
+        self
+    }
+
     pub fn description(mut self, value: impl Into<String>) -> Self {
         self.description = Some(value.into());
         self
@@ -58,6 +75,8 @@ impl DocumentTemplateBuilder {
     /// - [`name`](DocumentTemplateBuilder::name)
     pub fn build(self) -> Result<DocumentTemplate, BuildError> {
         Ok(DocumentTemplate {
+            checks: self.checks,
+            connectors: self.connectors,
             description: self.description.ok_or_else(|| BuildError::missing_field("description"))?,
             document: self.document.ok_or_else(|| BuildError::missing_field("document"))?,
             id: self.id.ok_or_else(|| BuildError::missing_field("id"))?,

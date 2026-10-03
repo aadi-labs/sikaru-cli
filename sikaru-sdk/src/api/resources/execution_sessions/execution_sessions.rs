@@ -43,7 +43,18 @@ impl ExecutionSessionsClient {
         project_id: &str,
         request: &ListQueryRequest,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<ExecutionSessionPage, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -83,7 +94,18 @@ impl ExecutionSessionsClient {
         project_id: &str,
         session_id: &str,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<ExecutionSessionResponse, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -131,8 +153,15 @@ impl ExecutionSessionsClient {
         request: &BranchInput,
         options: Option<RequestOptions>,
     ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -174,6 +203,17 @@ impl ExecutionSessionsClient {
         session_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -195,8 +235,15 @@ impl ExecutionSessionsClient {
         request: &UploadFileRequest,
         options: Option<RequestOptions>,
     ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -246,8 +293,15 @@ impl ExecutionSessionsClient {
         file_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -295,6 +349,17 @@ impl ExecutionSessionsClient {
         file_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<ByteStream, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_stream_request(
                 Method::GET,
@@ -333,6 +398,17 @@ impl ExecutionSessionsClient {
         session_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -371,6 +447,17 @@ impl ExecutionSessionsClient {
         session_id: &str,
         options: Option<RequestOptions>,
     ) -> Result<SessionSpend, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
         self.http_client
             .execute_request(
                 Method::GET,
@@ -424,9 +511,16 @@ impl ExecutionSessionsClient {
         session_id: &str,
         request: &TurnInput,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<ExecutionTurnResponse, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };
@@ -462,15 +556,7 @@ impl ExecutionSessionsClient {
     ///             &"project_id".to_string(),
     ///             &"harness_id".to_string(),
     ///             &SessionInput {
-    ///                 tenant_id: "tenant_id".to_string(),
-    ///                 user_id: "user_id".to_string(),
-    ///                 auto_improve: None,
-    ///                 conversation_id: None,
-    ///                 environment: None,
-    ///                 final_output_schema: None,
-    ///                 idempotency_key: None,
-    ///                 model: None,
-    ///                 reasoning_effort: None,
+    ///                 ..Default::default()
     ///             },
     ///             None,
     ///         )
@@ -483,9 +569,16 @@ impl ExecutionSessionsClient {
         harness_id: &str,
         request: &SessionInput,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<ExecutionSessionResponse, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
         let options = {
             let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
             o.max_retries = Some(0);
             Some(o)
         };

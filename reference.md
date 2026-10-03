@@ -9,8 +9,10 @@ Full command reference for `sikaru`.
 - [`sikaru agent-documents`](#sikaru-agent-documents)
 - [`sikaru agent-imports`](#sikaru-agent-imports)
 - [`sikaru agents`](#sikaru-agents)
+- [`sikaru auth`](#sikaru-auth)
 - [`sikaru capability-ceilings`](#sikaru-capability-ceilings)
 - [`sikaru changesets`](#sikaru-changesets)
+- [`sikaru channels`](#sikaru-channels)
 - [`sikaru checks`](#sikaru-checks)
 - [`sikaru compute-attachments`](#sikaru-compute-attachments)
 - [`sikaru compute-credentials`](#sikaru-compute-credentials)
@@ -36,6 +38,7 @@ Full command reference for `sikaru`.
 - [`sikaru git-credentials`](#sikaru-git-credentials)
 - [`sikaru harness-versions`](#sikaru-harness-versions)
 - [`sikaru harnesses`](#sikaru-harnesses)
+- [`sikaru http-channels`](#sikaru-http-channels)
 - [`sikaru import-sessions`](#sikaru-import-sessions)
 - [`sikaru issue-clusters`](#sikaru-issue-clusters)
 - [`sikaru judge-alignment`](#sikaru-judge-alignment)
@@ -44,6 +47,7 @@ Full command reference for `sikaru`.
 - [`sikaru model-gateway`](#sikaru-model-gateway)
 - [`sikaru model-settings`](#sikaru-model-settings)
 - [`sikaru online-evaluations`](#sikaru-online-evaluations)
+- [`sikaru personal-channels`](#sikaru-personal-channels)
 - [`sikaru release-watches`](#sikaru-release-watches)
 - [`sikaru retention-policies`](#sikaru-retention-policies)
 - [`sikaru review-queue`](#sikaru-review-queue)
@@ -177,6 +181,28 @@ Dismiss Suggestion
 | `--project-id` | `string` | Yes |  |
 | `--agent-slug` | `string` | Yes |  |
 
+#### `sikaru agent-documents draft`
+
+Draft a first agent document, starter checks and suggested apps from a description or past conversations.
+
+`POST /v1/projects/{project_id}/agent-documents/draft`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-documents edit-setting`
+
+Set or remove one setting without rewriting the rest of the document.
+
+`POST /v1/projects/{project_id}/agent-documents/settings`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
 #### `sikaru agent-documents get`
 
 Get Document
@@ -265,6 +291,18 @@ Revert
 | `--agent-slug` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
+#### `sikaru agent-documents review`
+
+Review Document
+
+`POST /v1/projects/{project_id}/managed-agents/{agent_slug}/document/review`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
 #### `sikaru agent-documents save`
 
 Save Document
@@ -298,6 +336,17 @@ Validate Agent Document
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru agent-documents validate-text`
+
+Validate Project Document
+
+`POST /v1/projects/{project_id}/agent-documents/validate`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---
@@ -340,6 +389,16 @@ Create Managed Session
 | `--project-id` | `string` | Yes |  |
 | `--agent-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru auth`
+
+#### `sikaru auth get-device-configuration`
+
+Device Configuration
+
+`GET /v1/auth/device/config`
 
 ---
 
@@ -485,6 +544,335 @@ Stage Changeset
 | `--project-id` | `string` | Yes |  |
 | `--changeset-id` | `string` | Yes |  |
 | `--json` | `JSON` | No | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru channels`
+
+#### `sikaru channels availability`
+
+Availability
+
+`GET /v1/projects/{project_id}/channels/availability`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels bindings`
+
+Bindings
+
+`GET /v1/projects/{project_id}/channels/bindings`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-id` | `string` | Yes |  |
+
+#### `sikaru channels complete`
+
+Complete
+
+`POST /v1/projects/{project_id}/channels/slack/oauth/complete`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels configure-http-binding`
+
+Configure Http Binding
+
+`PATCH /v1/projects/{project_id}/channels/bindings/{binding_id}/configuration`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels configure-personal-access`
+
+Configure
+
+`PUT /v1/projects/{project_id}/channels/bindings/{binding_id}/personal-access`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels create-binding`
+
+Create Binding
+
+`POST /v1/projects/{project_id}/channels/bindings`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels create-identity-app`
+
+Create
+
+`POST /v1/projects/{project_id}/channels/identity-apps`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels create-personal-slack-binding`
+
+Customer Dm
+
+`POST /v1/projects/{project_id}/channels/personal-slack-bindings`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels delete-http-binding`
+
+Delete Http Binding
+
+`DELETE /v1/projects/{project_id}/channels/bindings/{binding_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels delivery`
+
+Delivery
+
+`GET /v1/projects/{project_id}/channels/runs/{run_id}/delivery`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--run-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels disconnect`
+
+Disconnect
+
+`POST /v1/projects/{project_id}/channels/slack/installations/{installation_id}/disconnect`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--installation-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels dm-status`
+
+Dm Status
+
+`GET /v1/projects/{project_id}/channels/slack/dm-verifications/{verification_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--verification-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels get-creation-resume`
+
+Get Creation Resume
+
+`GET /v1/projects/{project_id}/channels/creation-resumes/{resume_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--resume-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels get-member-slack-link`
+
+Member Link Status
+
+`GET /v1/projects/{project_id}/channels/bindings/{binding_id}/slack-link-verifications/{verification_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--verification-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels installations`
+
+Installations
+
+`GET /v1/projects/{project_id}/channels/slack/installations`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels issue-http-credential`
+
+Issue Http Credential
+
+`POST /v1/projects/{project_id}/channels/bindings/{binding_id}/credential`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels list-identity-apps`
+
+List Apps
+
+`GET /v1/projects/{project_id}/channels/identity-apps`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels recent-receipts`
+
+Recent Receipts
+
+`GET /v1/projects/{project_id}/channels/bindings/{binding_id}/receipts`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels resend-delivery`
+
+Resend Delivery
+
+`POST /v1/projects/{project_id}/channels/runs/{run_id}/delivery/resend`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--run-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels revoke-identity-app`
+
+Revoke
+
+`DELETE /v1/projects/{project_id}/channels/identity-apps/{app_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--app-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels revoke-subject`
+
+Revoke Subject
+
+`POST /v1/projects/{project_id}/channels/identity-apps/{app_id}/subjects/revoke`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--app-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels rooms`
+
+Rooms
+
+`GET /v1/projects/{project_id}/channels/slack/installations/{installation_id}/rooms`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--installation-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels save-creation-resume`
+
+Save Creation Resume
+
+`POST /v1/projects/{project_id}/channels/creation-resumes`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels start`
+
+Start
+
+`POST /v1/projects/{project_id}/channels/slack/oauth/start`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels start-dm`
+
+Start Dm
+
+`POST /v1/projects/{project_id}/channels/slack/installations/{installation_id}/dm-verifications`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--installation-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels start-member-slack-link`
+
+Link
+
+`POST /v1/projects/{project_id}/channels/bindings/{binding_id}/slack-links`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels status`
+
+Status
+
+`PATCH /v1/projects/{project_id}/channels/bindings/{binding_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru channels unlink-member-slack-identity`
+
+Member Unlink
+
+`DELETE /v1/projects/{project_id}/channels/bindings/{binding_id}/slack-links/{installation_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--installation-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+
+#### `sikaru channels update-identity-app-urls`
+
+Update Urls
+
+`PATCH /v1/projects/{project_id}/channels/identity-apps/{app_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--app-id` | `string` | Yes |  |
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---
 
@@ -1736,6 +2124,62 @@ Reserved, unavailable model-training step; no learning job is submitted.
 
 ---
 
+### `sikaru http-channels`
+
+#### `sikaru http-channels invoke`
+
+Invoke
+
+`POST /v1/channel-bindings/{binding_id}/messages`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru http-channels poll`
+
+Poll
+
+`GET /v1/channel-bindings/{binding_id}/messages/{receipt_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--receipt-id` | `string` | Yes |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+
+#### `sikaru http-channels start-slack-link`
+
+Link
+
+`POST /v1/channel-bindings/{binding_id}/slack-links`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru http-channels unlink-slack-identity`
+
+Unlink
+
+`DELETE /v1/channel-bindings/{binding_id}/slack-links/{installation_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--installation-id` | `string` | Yes |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+
+---
+
 ### `sikaru import-sessions`
 
 #### `sikaru import-sessions create-compatibility-profile`
@@ -1986,6 +2430,17 @@ Create Managed Agent
 | `--project-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
+#### `sikaru managed-agents delete-managed-agent`
+
+Delete an agent that has never gone live, with its drafts, checks and schedules.
+
+`DELETE /v1/projects/{project_id}/managed-agents/{agent_slug}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+
 #### `sikaru managed-agents get-definition-revision`
 
 Get Definition Revision
@@ -2007,6 +2462,18 @@ List Managed Agents
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
+
+#### `sikaru managed-agents rename-managed-agent`
+
+Change the agent's display name. The slug and every reference to the agent stay the same.
+
+`PATCH /v1/projects/{project_id}/managed-agents/{agent_slug}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---
 
@@ -2115,6 +2582,158 @@ Update Policy
 
 ---
 
+### `sikaru personal-channels`
+
+#### `sikaru personal-channels authorize-connection`
+
+Authorize
+
+`POST /v1/personal-channel-bindings/{binding_id}/messages/{receipt_id}/connections/{connection_id}/authorize`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--binding-id` | `string` | Yes |  |
+| `--receipt-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+
+#### `sikaru personal-channels complete-connection`
+
+Complete
+
+`POST /v1/personal-channel-bindings/{binding_id}/messages/{receipt_id}/connections/{connection_id}/complete`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--binding-id` | `string` | Yes |  |
+| `--receipt-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru personal-channels decide-approval`
+
+Approve
+
+`POST /v1/personal-channel-bindings/{binding_id}/messages/{receipt_id}/tool-calls/{tool_call_id}/approval`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--tool-call-id` | `string` | Yes |  |
+| `--binding-id` | `string` | Yes |  |
+| `--receipt-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru personal-channels download-file`
+
+Download
+
+`GET /v1/personal-channel-bindings/{binding_id}/messages/{receipt_id}/files/{file_id}/content`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--file-id` | `string` | Yes |  |
+| `--binding-id` | `string` | Yes |  |
+| `--receipt-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+
+#### `sikaru personal-channels get-message`
+
+Message
+
+`GET /v1/personal-channel-bindings/{binding_id}/messages/{receipt_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--receipt-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+
+#### `sikaru personal-channels get-slack-link`
+
+Status
+
+`GET /v1/personal-channel-bindings/{binding_id}/slack-link-verifications/{verification_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--verification-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+
+#### `sikaru personal-channels list-files`
+
+Files
+
+`GET /v1/personal-channel-bindings/{binding_id}/messages/{receipt_id}/files`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--receipt-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+
+#### `sikaru personal-channels replace-connection-credentials`
+
+Credentials
+
+`PUT /v1/personal-channel-bindings/{binding_id}/messages/{receipt_id}/connections/{connection_id}/credentials`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--connection-id` | `string` | Yes |  |
+| `--binding-id` | `string` | Yes |  |
+| `--receipt-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru personal-channels start-slack-link`
+
+Start
+
+`POST /v1/personal-channel-bindings/{binding_id}/slack-links`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru personal-channels unlink-slack-identity`
+
+Unlink
+
+`DELETE /v1/personal-channel-bindings/{binding_id}/slack-links/{installation_id}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--binding-id` | `string` | Yes |  |
+| `--installation-id` | `string` | Yes |  |
+| `--authorization` | `string` | No |  |
+| `--x-sikaru-user-assertion` | `string` | No |  |
+| `--x-sikaru-member-authorization` | `string` | No |  |
+
+---
+
 ### `sikaru release-watches`
 
 #### `sikaru release-watches create-release-watch`
@@ -2194,6 +2813,7 @@ List Schedules
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--session-id` | `string` | No |  |
+| `--agent-slug` | `string` | No |  |
 
 #### `sikaru run-schedules pause-schedule`
 
@@ -2219,6 +2839,17 @@ Schedule History
 | `--schedule-id` | `string` | Yes |  |
 | `--before` | `string` | No |  |
 | `--limit` | `integer` | No |  |
+
+#### `sikaru run-schedules schedule-notices`
+
+Schedule Notices
+
+`GET /v1/projects/{project_id}/run-schedules/{schedule_id}/notices`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--schedule-id` | `string` | Yes |  |
 
 ---
 

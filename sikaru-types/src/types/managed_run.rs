@@ -10,6 +10,11 @@ pub struct ManagedRun {
     #[serde(rename = "completedAt")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connections: Option<Vec<PersonalConnectionPrompt>>,
+    #[serde(rename = "contentVisible")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_visible: Option<bool>,
     #[serde(rename = "costSummary")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_summary: Option<HashMap<String, serde_json::Value>>,
@@ -25,6 +30,8 @@ pub struct ManagedRun {
     #[serde(rename = "latencyMs")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal: Option<bool>,
     #[serde(rename = "runId")]
     #[serde(default)]
     pub run_id: String,
@@ -46,11 +53,14 @@ impl ManagedRun {
 pub struct ManagedRunBuilder {
     compatibility_profile_id: Option<String>,
     completed_at: Option<String>,
+    connections: Option<Vec<PersonalConnectionPrompt>>,
+    content_visible: Option<bool>,
     cost_summary: Option<HashMap<String, serde_json::Value>>,
     events_url: Option<String>,
     harness_id: Option<String>,
     harness_version_id: Option<String>,
     latency_ms: Option<f64>,
+    personal: Option<bool>,
     run_id: Option<String>,
     status: Option<String>,
     usage_summary: Option<HashMap<String, serde_json::Value>>,
@@ -64,6 +74,16 @@ impl ManagedRunBuilder {
 
     pub fn completed_at(mut self, value: impl Into<String>) -> Self {
         self.completed_at = Some(value.into());
+        self
+    }
+
+    pub fn connections(mut self, value: Vec<PersonalConnectionPrompt>) -> Self {
+        self.connections = Some(value);
+        self
+    }
+
+    pub fn content_visible(mut self, value: bool) -> Self {
+        self.content_visible = Some(value);
         self
     }
 
@@ -89,6 +109,11 @@ impl ManagedRunBuilder {
 
     pub fn latency_ms(mut self, value: f64) -> Self {
         self.latency_ms = Some(value);
+        self
+    }
+
+    pub fn personal(mut self, value: bool) -> Self {
+        self.personal = Some(value);
         self
     }
 
@@ -118,11 +143,14 @@ impl ManagedRunBuilder {
         Ok(ManagedRun {
             compatibility_profile_id: self.compatibility_profile_id,
             completed_at: self.completed_at,
+            connections: self.connections,
+            content_visible: self.content_visible,
             cost_summary: self.cost_summary,
             events_url: self.events_url.ok_or_else(|| BuildError::missing_field("events_url"))?,
             harness_id: self.harness_id.ok_or_else(|| BuildError::missing_field("harness_id"))?,
             harness_version_id: self.harness_version_id.ok_or_else(|| BuildError::missing_field("harness_version_id"))?,
             latency_ms: self.latency_ms,
+            personal: self.personal,
             run_id: self.run_id.ok_or_else(|| BuildError::missing_field("run_id"))?,
             status: self.status.ok_or_else(|| BuildError::missing_field("status"))?,
             usage_summary: self.usage_summary,

@@ -11,19 +11,20 @@ pub mod resources;
 
 pub use resources::{
     ActivationClient, AgentBudgetsClient, AgentDocumentsClient, AgentImportsClient, AgentsClient,
-    ApiClient, CapabilityCeilingsClient, ChangesetsClient, ChecksClient, ComputeAttachmentsClient,
-    ComputeCredentialsClient, ComputeEnvironmentsClient, ComputeOperationsClient,
-    ComputeWorkersClient, ComputeWorkspacesClient, ConnectionsClient, ContextRegistryClient,
-    ConversationsClient, DeploymentsClient, EnvironmentsClient, EvalSeedsClient,
-    EvaluationComparisonsClient, EvaluationCriteriaClient, EvaluationJobsClient,
+    ApiClient, AuthClient, CapabilityCeilingsClient, ChangesetsClient, ChannelsClient,
+    ChecksClient, ComputeAttachmentsClient, ComputeCredentialsClient, ComputeEnvironmentsClient,
+    ComputeOperationsClient, ComputeWorkersClient, ComputeWorkspacesClient, ConnectionsClient,
+    ContextRegistryClient, ConversationsClient, DeploymentsClient, EnvironmentsClient,
+    EvalSeedsClient, EvaluationComparisonsClient, EvaluationCriteriaClient, EvaluationJobsClient,
     EvaluationResultsClient, EvaluatorRunsClient, ExecutionObjectivesClient,
     ExecutionSessionsClient, ExecutionsClient, FeedbackClient, GitCredentialsClient,
-    HarnessVersionsClient, HarnessesClient, ImportSessionsClient, IssueClustersClient,
-    JudgeAlignmentClient, ManagedAgentsClient, MemoryRegistryClient, ModelGatewayClient,
-    ModelSettingsClient, OnlineEvaluationsClient, ReleaseWatchesClient, RetentionPoliciesClient,
-    ReviewQueueClient, RunSchedulesClient, RunWebhooksClient, RunsClient, SessionsClient,
-    SpecialistsClient, ToolProvidersClient, TraceImportConnectionsClient, TraceImportsClient,
-    TraceStreamsClient, WorkflowIntentsClient, WorkflowRunsClient, WorkflowsClient,
+    HarnessVersionsClient, HarnessesClient, HttpChannelsClient, ImportSessionsClient,
+    IssueClustersClient, JudgeAlignmentClient, ManagedAgentsClient, MemoryRegistryClient,
+    ModelGatewayClient, ModelSettingsClient, OnlineEvaluationsClient, PersonalChannelsClient,
+    ReleaseWatchesClient, RetentionPoliciesClient, ReviewQueueClient, RunSchedulesClient,
+    RunWebhooksClient, RunsClient, SessionsClient, SpecialistsClient, ToolProvidersClient,
+    TraceImportConnectionsClient, TraceImportsClient, TraceStreamsClient, WorkflowIntentsClient,
+    WorkflowRunsClient, WorkflowsClient,
 };
 
 pub use sikaru_types::*;

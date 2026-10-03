@@ -14,10 +14,7 @@
 //!         ..Default::default()
 //!     };
 //!     let client = SikaruClient::new(config).expect("Failed to build client");
-//!     client
-//!         .activation
-//!         .project_activation_status(&"project_id".to_string(), None)
-//!         .await;
+//!     client.auth.get_device_configuration(None).await;
 //! }
 //! ```
 //!

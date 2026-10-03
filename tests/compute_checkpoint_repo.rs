@@ -59,7 +59,7 @@ fn task_repository_git_dir_and_status_are_never_modified() {
     let repo = open(&f, &[]);
     let staged = repo.stage().unwrap();
     let chain = repo
-        .chain(None, &[], staged.tree, 50_000_000, "checkpoint")
+        .chain(None, staged.tree, 50_000_000, "checkpoint")
         .unwrap();
     repo.pack(chain.commits[0], &[]).unwrap();
     assert_eq!(
@@ -97,6 +97,8 @@ fn ignore_rules_apply_and_tracked_ignored_paths_are_dropped() {
         "src/__pycache__/m.pyc",
         "target/debug/app",
         "pkg.egg-info/PKG",
+        ".env",
+        "deploy.pem",
     ] {
         assert!(
             !tree.contains_key(ignored),
@@ -105,13 +107,85 @@ fn ignore_rules_apply_and_tracked_ignored_paths_are_dropped() {
     }
     assert!(tree.keys().all(|p| !p.starts_with(".git/")));
     assert!(tree.contains_key(".gitignore"));
-    let seed = text(git(&f.ws, &["rev-parse", "HEAD"]));
-    assert_eq!(repo.seed().unwrap().to_string(), seed);
-    let chain = repo
-        .chain(None, &[], staged.tree, 50_000_000, "checkpoint")
+    assert!(
+        tree.contains_key(".env.example"),
+        "credential templates are published"
+    );
+}
+
+#[test]
+fn the_first_checkpoint_is_a_root_commit_without_task_history() {
+    let f = fixture();
+    task_repository(&f.ws);
+    std::fs::write(f.ws.join("second.txt"), "two").unwrap();
+    git(&f.ws, &["add", "second.txt"]);
+    git(&f.ws, &["commit", "-qm", "second"]);
+    let repo = open(&f, &[]);
+    let staged = repo.stage().unwrap();
+    let first = repo
+        .chain(None, staged.tree, 50_000_000, "checkpoint")
         .unwrap();
-    assert_eq!(chain.parent.unwrap().to_string(), seed);
-    assert!(chain.history);
+    assert_eq!(first.parent, None);
+    let private = git2::Repository::open_bare(f.state.join("workspace.git")).unwrap();
+    assert_eq!(
+        private
+            .find_commit(first.commits[0])
+            .unwrap()
+            .parent_count(),
+        0
+    );
+    let task_head = git2::Oid::from_str(&text(git(&f.ws, &["rev-parse", "HEAD"]))).unwrap();
+    assert!(
+        private.find_commit(task_head).is_err(),
+        "the task repository's objects are not reachable from the private repository"
+    );
+    repo.set_pushed("refs/heads/sessions/test", first.commits[0])
+        .unwrap();
+    std::fs::write(f.ws.join("tracked.txt"), "changed again").unwrap();
+    let next = repo
+        .chain(
+            Some(first.commits[0]),
+            repo.stage().unwrap().tree,
+            50_000_000,
+            "checkpoint",
+        )
+        .unwrap();
+    let delta = repo.pack(next.commits[0], &[first.commits[0]]).unwrap();
+    assert!(
+        delta.objects <= 3,
+        "only the commit, its tree and one blob: {}",
+        delta.objects
+    );
+    let unchanged = repo
+        .chain(
+            Some(next.commits[0]),
+            repo.stage().unwrap().tree,
+            50_000_000,
+            "checkpoint",
+        )
+        .unwrap();
+    assert!(unchanged.commits.is_empty());
+}
+
+#[test]
+fn files_over_the_storage_blob_cap_are_skipped_even_within_the_pack_budget() {
+    let f = fixture();
+    std::fs::write(f.ws.join("small.txt"), "small").unwrap();
+    std::fs::write(f.ws.join("model.bin"), noise(32_000_001, 7)).unwrap();
+    let repo = open(&f, &[]);
+    let chain = repo
+        .chain(None, repo.stage().unwrap().tree, 90_000_000, "checkpoint")
+        .unwrap();
+    assert!(chain
+        .skipped
+        .iter()
+        .any(|s| s.path == "model.bin" && s.reason == SkipReason::TooLarge));
+    let private = git2::Repository::open_bare(f.state.join("workspace.git")).unwrap();
+    let head = private.find_commit(*chain.commits.last().unwrap()).unwrap();
+    assert_eq!(
+        files(&f, head.tree_id()).keys().collect::<Vec<_>>(),
+        vec!["small.txt"]
+    );
 }
 
 #[test]
@@ -196,7 +270,7 @@ fn large_change_sets_split_into_chained_commits_within_budget() {
     let repo = open(&f, &[]);
     let staged = repo.stage().unwrap();
     let chain = repo
-        .chain(None, &[], staged.tree, 150_000, "checkpoint")
+        .chain(None, staged.tree, 150_000, "checkpoint")
         .unwrap();
     assert!(chain.commits.len() >= 3, "{}", chain.commits.len());
     assert_eq!(chain.parent, None);
@@ -225,154 +299,6 @@ fn large_change_sets_split_into_chained_commits_within_budget() {
 }
 
 #[test]
-fn seeded_history_is_packed_once_and_later_packs_carry_only_changes() {
-    let f = fixture();
-    task_repository(&f.ws);
-    std::fs::write(f.ws.join("second.txt"), "two").unwrap();
-    git(&f.ws, &["add", "second.txt"]);
-    git(&f.ws, &["commit", "-qm", "second"]);
-    let repo = open(&f, &[]);
-    let staged = repo.stage().unwrap();
-    let first = repo
-        .chain(None, &[], staged.tree, 50_000_000, "checkpoint")
-        .unwrap();
-    assert!(first.history);
-    let history = repo.pack(first.commits[0], &[]).unwrap();
-    assert!(
-        history.objects >= 8,
-        "seed history travels in the first pack: {}",
-        history.objects
-    );
-    repo.set_pushed("refs/heads/sessions/test", first.commits[0])
-        .unwrap();
-    std::fs::write(f.ws.join("tracked.txt"), "changed again").unwrap();
-    let staged = repo.stage().unwrap();
-    let next = repo
-        .chain(
-            Some(first.commits[0]),
-            &[],
-            staged.tree,
-            50_000_000,
-            "checkpoint",
-        )
-        .unwrap();
-    assert!(!next.history);
-    let delta = repo.pack(next.commits[0], &[first.commits[0]]).unwrap();
-    assert!(
-        delta.objects <= 3,
-        "only the commit, its tree and one blob: {}",
-        delta.objects
-    );
-    let unchanged = repo
-        .chain(
-            Some(next.commits[0]),
-            &[],
-            repo.stage().unwrap().tree,
-            50_000_000,
-            "checkpoint",
-        )
-        .unwrap();
-    assert!(unchanged.commits.is_empty());
-}
-
-#[test]
-fn only_a_whole_repository_workspace_with_full_history_is_seeded() {
-    let f = fixture();
-    task_repository(&f.ws);
-    let sub = f.ws.join("sub");
-    std::fs::create_dir_all(&sub).unwrap();
-    std::fs::write(sub.join("x"), "x").unwrap();
-    let state = f.state.join("sub");
-    assert!(
-        PrivateRepo::open_or_init(&state.join("workspace.git"), &sub)
-            .unwrap()
-            .seed()
-            .is_none()
-    );
-    let unborn = f.state.join("unborn-ws");
-    std::fs::create_dir_all(&unborn).unwrap();
-    git(&unborn, &["init", "-q"]);
-    assert!(
-        PrivateRepo::open_or_init(&f.state.join("unborn/workspace.git"), &unborn)
-            .unwrap()
-            .seed()
-            .is_none()
-    );
-    let shallow = f.state.join("shallow-ws");
-    let url = format!("file://{}", f.ws.display());
-    git(
-        &f.state,
-        &[
-            "clone",
-            "-q",
-            "--depth",
-            "1",
-            &url,
-            shallow.to_str().unwrap(),
-        ],
-    );
-    assert!(
-        PrivateRepo::open_or_init(&f.state.join("shallow/workspace.git"), &shallow)
-            .unwrap()
-            .seed()
-            .is_none()
-    );
-}
-
-#[test]
-fn a_second_session_seeded_from_the_same_head_omits_the_advertised_history() {
-    let f = fixture();
-    task_repository(&f.ws);
-    for i in 0..5 {
-        std::fs::write(
-            f.ws.join(format!("history-{i}.txt")),
-            format!("revision {i}"),
-        )
-        .unwrap();
-        git(&f.ws, &["add", "."]);
-        git(&f.ws, &["commit", "-qm", &format!("history {i}")]);
-    }
-    let seed = git2::Oid::from_str(&text(git(&f.ws, &["rev-parse", "HEAD"]))).unwrap();
-    let first_session = open(&f, &[]);
-    let staged = first_session.stage().unwrap();
-    let first = first_session
-        .chain(None, &[], staged.tree, 50_000_000, "checkpoint")
-        .unwrap();
-    let full = first_session.pack(first.commits[0], &[]).unwrap();
-    // A second session: its own state dir, the same task HEAD, and the scope advertising the seed.
-    let state = f.state.join("second");
-    let second_session = PrivateRepo::open_or_init(&state.join("workspace.git"), &f.ws).unwrap();
-    second_session
-        .write_exclude(&ignore_defaults(), std::slice::from_ref(&state))
-        .unwrap();
-    assert_eq!(second_session.seed(), Some(seed));
-    let staged = second_session.stage().unwrap();
-    let chain = second_session
-        .chain(None, &[seed], staged.tree, 50_000_000, "checkpoint")
-        .unwrap();
-    assert!(chain.history);
-    assert_eq!(chain.parent, Some(seed));
-    let thin = second_session.pack(chain.commits[0], &[seed]).unwrap();
-    assert!(
-        thin.objects <= 8,
-        "only the checkpoint commit, its trees and changed blobs: {}",
-        thin.objects
-    );
-    assert!(
-        thin.objects * 3 < full.objects,
-        "history excluded: {} vs {}",
-        thin.objects,
-        full.objects
-    );
-    assert!(thin.bytes.len() < full.bytes.len());
-    // An advertised seed also lifts the size gate: a small budget still seeds.
-    let tight = second_session
-        .chain(None, &[seed], staged.tree, 1_000, "checkpoint")
-        .unwrap();
-    assert_eq!(tight.parent, Some(seed));
-}
-
-#[test]
 fn a_head_missing_locally_gets_a_full_tree_commit_on_top_of_it() {
     let f = fixture();
     std::fs::write(f.ws.join("a.txt"), "a").unwrap();
@@ -380,7 +306,7 @@ fn a_head_missing_locally_gets_a_full_tree_commit_on_top_of_it() {
     let staged = repo.stage().unwrap();
     let foreign = git2::Oid::from_str("1111111111111111111111111111111111111111").unwrap();
     let chain = repo
-        .chain(Some(foreign), &[], staged.tree, 50_000_000, "checkpoint")
+        .chain(Some(foreign), staged.tree, 50_000_000, "checkpoint")
         .unwrap();
     assert_eq!(chain.parent, Some(foreign));
     let pack = repo.pack(chain.commits[0], &[foreign]).unwrap();
@@ -388,29 +314,17 @@ fn a_head_missing_locally_gets_a_full_tree_commit_on_top_of_it() {
 }
 
 #[test]
-fn seed_is_captured_once_and_deletions_follow_the_working_tree() {
+fn deletions_follow_the_working_tree() {
     let f = fixture();
     task_repository(&f.ws);
     let repo = open(&f, &[]);
-    let seed = repo.seed();
-    std::fs::write(f.ws.join("later.txt"), "later").unwrap();
-    git(&f.ws, &["add", "later.txt"]);
-    git(&f.ws, &["commit", "-qm", "later"]);
-    assert_eq!(open(&f, &[]).seed(), seed);
     let first = repo
-        .chain(
-            None,
-            &[],
-            repo.stage().unwrap().tree,
-            50_000_000,
-            "checkpoint",
-        )
+        .chain(None, repo.stage().unwrap().tree, 50_000_000, "checkpoint")
         .unwrap();
     std::fs::remove_file(f.ws.join("tracked.txt")).unwrap();
     let next = repo
         .chain(
             first.commits.last().copied(),
-            &[],
             repo.stage().unwrap().tree,
             50_000_000,
             "checkpoint",
@@ -428,36 +342,9 @@ fn empty_initial_workspace_still_has_a_checkpoint_commit() {
     let f = fixture();
     let repo = open(&f, &[]);
     let chain = repo
-        .chain(
-            None,
-            &[],
-            repo.stage().unwrap().tree,
-            50_000_000,
-            "checkpoint",
-        )
+        .chain(None, repo.stage().unwrap().tree, 50_000_000, "checkpoint")
         .unwrap();
     assert_eq!(chain.commits.len(), 1);
-}
-
-#[test]
-fn a_seed_with_an_unchanged_tree_still_creates_an_unborn_branch_child() {
-    let f = fixture();
-    git(&f.ws, &["init", "-q"]);
-    std::fs::write(f.ws.join("file"), "content").unwrap();
-    git(&f.ws, &["add", "file"]);
-    git(&f.ws, &["commit", "-qm", "base"]);
-    let repo = open(&f, &[]);
-    let chain = repo
-        .chain(
-            None,
-            &[],
-            repo.stage().unwrap().tree,
-            50_000_000,
-            "checkpoint",
-        )
-        .unwrap();
-    assert_eq!(chain.commits.len(), 1);
-    assert_eq!(chain.parent, repo.seed());
 }
 
 #[test]
@@ -466,7 +353,7 @@ fn pack_overhead_does_not_push_a_file_past_the_budget() {
     std::fs::write(f.ws.join("almost-full.bin"), noise(4_000, 9)).unwrap();
     let repo = open(&f, &[]);
     let chain = repo
-        .chain(None, &[], repo.stage().unwrap().tree, 4_010, "checkpoint")
+        .chain(None, repo.stage().unwrap().tree, 4_010, "checkpoint")
         .unwrap();
     assert!(chain
         .skipped
@@ -496,13 +383,7 @@ fn unknown_advertised_objects_do_not_prevent_local_history_packing() {
     std::fs::write(f.ws.join("file"), "content").unwrap();
     let repo = open(&f, &[]);
     let chain = repo
-        .chain(
-            None,
-            &[],
-            repo.stage().unwrap().tree,
-            50_000_000,
-            "checkpoint",
-        )
+        .chain(None, repo.stage().unwrap().tree, 50_000_000, "checkpoint")
         .unwrap();
     let unknown = git2::Oid::from_str("2222222222222222222222222222222222222222").unwrap();
     assert_eq!(repo.pack(chain.commits[0], &[unknown]).unwrap().objects, 3);
@@ -537,7 +418,6 @@ fn split_after_a_foreign_head_retains_every_admitted_file() {
     let chain = repo
         .chain(
             Some(foreign),
-            &[],
             repo.stage().unwrap().tree,
             150_000,
             "checkpoint",
@@ -569,16 +449,12 @@ fn cancelled_checkpoint_does_not_stage_pack_or_advance_refs() {
     )
     .unwrap();
     let staged = repo.stage().unwrap();
-    let chain = repo
-        .chain(None, &[], staged.tree, 1_000_000, "before")
-        .unwrap();
+    let chain = repo.chain(None, staged.tree, 1_000_000, "before").unwrap();
     let commit = chain.commits[0];
     cancellation.cancel();
     std::fs::write(f.ws.join("task.txt"), "after").unwrap();
     assert!(repo.stage().is_err());
-    assert!(repo
-        .chain(None, &[], staged.tree, 1_000_000, "after")
-        .is_err());
+    assert!(repo.chain(None, staged.tree, 1_000_000, "after").is_err());
     assert!(repo.pack(commit, &[]).is_err());
     assert!(repo.set_pushed("refs/heads/session", commit).is_err());
     let raw = git2::Repository::open_bare(f.state.join("workspace.git")).unwrap();

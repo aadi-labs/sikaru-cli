@@ -230,8 +230,8 @@ async fn provision(m: &clap::ArgMatches, c: &ApiClient, s: &mut State<Saved>) ->
             &s.value.project,
             &s.value.agent,
             &SessionInput {
-                tenant_id: m.get_one::<String>("tenant").unwrap().clone(),
-                user_id: m.get_one::<String>("user").unwrap().clone(),
+                tenant_id: Some(m.get_one::<String>("tenant").unwrap().clone()),
+                user_id: Some(m.get_one::<String>("user").unwrap().clone()),
                 idempotency_key: Some(s.value.key.clone()),
                 model: s.value.model.clone(),
                 ..Default::default()
@@ -239,13 +239,7 @@ async fn provision(m: &clap::ArgMatches, c: &ApiClient, s: &mut State<Saved>) ->
             None,
         ))
         .await?;
-        s.value.session = Some(
-            response
-                .get("session")
-                .and_then(|s| s["id"].as_str())
-                .context("missing session identity")?
-                .to_owned(),
-        );
+        s.value.session = Some(response.session.id);
         s.save()?;
     }
     if s.value.environment.is_none() {
@@ -494,13 +488,7 @@ async fn submit(
         None,
     ))
     .await?;
-    s.value.run_id = Some(
-        response
-            .get("run")
-            .and_then(|r| r["id"].as_str())
-            .context("missing run identity")?
-            .to_owned(),
-    );
+    s.value.run_id = Some(response.run.id);
     s.save()?;
     runtime::progress(
         interactive,

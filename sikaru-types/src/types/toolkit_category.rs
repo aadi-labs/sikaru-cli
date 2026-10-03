@@ -6,8 +6,8 @@ use super::*;
 pub struct ToolkitCategory {
     #[serde(default)]
     pub id: String,
-    #[serde(default)]
-    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl ToolkitCategory {
@@ -37,11 +37,10 @@ impl ToolkitCategoryBuilder {
     /// Consumes the builder and constructs a [`ToolkitCategory`].
     /// This method will fail if any of the following fields are not set:
     /// - [`id`](ToolkitCategoryBuilder::id)
-    /// - [`name`](ToolkitCategoryBuilder::name)
     pub fn build(self) -> Result<ToolkitCategory, BuildError> {
         Ok(ToolkitCategory {
             id: self.id.ok_or_else(|| BuildError::missing_field("id"))?,
-            name: self.name.ok_or_else(|| BuildError::missing_field("name"))?,
+            name: self.name,
         })
     }
 }
