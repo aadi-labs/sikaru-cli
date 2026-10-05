@@ -2,7 +2,7 @@ pub use crate::prelude::*;
 #[allow(unused_imports)]
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct CreateDataset {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -10,7 +10,8 @@ pub struct CreateDataset {
     pub idempotency_key: Option<String>,
     #[serde(default)]
     pub name: String,
-    pub purpose: CreateDatasetPurpose,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<CreateDatasetPurpose>,
 }
 
 impl CreateDataset {
@@ -52,13 +53,12 @@ impl CreateDatasetBuilder {
     /// Consumes the builder and constructs a [`CreateDataset`].
     /// This method will fail if any of the following fields are not set:
     /// - [`name`](CreateDatasetBuilder::name)
-    /// - [`purpose`](CreateDatasetBuilder::purpose)
     pub fn build(self) -> Result<CreateDataset, BuildError> {
         Ok(CreateDataset {
             description: self.description,
             idempotency_key: self.idempotency_key,
             name: self.name.ok_or_else(|| BuildError::missing_field("name"))?,
-            purpose: self.purpose.ok_or_else(|| BuildError::missing_field("purpose"))?,
+            purpose: self.purpose,
         })
     }
 }

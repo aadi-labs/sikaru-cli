@@ -85,9 +85,9 @@ impl DatasetsClient {
     ///             &"project_id".to_string(),
     ///             &CreateDataset {
     ///                 name: "name".to_string(),
-    ///                 purpose: CreateDatasetPurpose::Eval,
     ///                 description: None,
     ///                 idempotency_key: None,
+    ///                 purpose: None,
     ///             },
     ///             None,
     ///         )
@@ -152,7 +152,7 @@ impl DatasetsClient {
     ///             &CaptureIntoNewRequest {
     ///                 dataset: NewDataset {
     ///                     name: "name".to_string(),
-    ///                     purpose: NewDatasetPurpose::Eval,
+    ///                     ..Default::default()
     ///                 },
     ///                 idempotency_key: "idempotency_key".to_string(),
     ///                 items: vec![CaptureItem {

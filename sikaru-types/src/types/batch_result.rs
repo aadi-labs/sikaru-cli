@@ -2,10 +2,11 @@ pub use crate::prelude::*;
 #[allow(unused_imports)]
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct BatchResult {
     #[serde(default)]
     pub counts: BatchCounts,
+    #[serde(default)]
     pub dataset: Dataset,
     #[serde(default)]
     pub items: Vec<BatchItem>,

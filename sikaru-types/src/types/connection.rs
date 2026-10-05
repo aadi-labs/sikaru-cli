@@ -29,6 +29,8 @@ pub struct Connection {
     #[serde(default)]
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_count: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_load: Option<ConnectionToolLoad>,
     #[serde(default)]
     pub tools: Vec<ConnectionTool>,
@@ -59,6 +61,7 @@ pub struct ConnectionBuilder {
     revocation: Option<String>,
     slug: Option<String>,
     status: Option<String>,
+    tool_count: Option<i64>,
     tool_load: Option<ConnectionToolLoad>,
     tools: Option<Vec<ConnectionTool>>,
     used_by: Option<ConnectionUsage>,
@@ -126,6 +129,11 @@ impl ConnectionBuilder {
         self
     }
 
+    pub fn tool_count(mut self, value: i64) -> Self {
+        self.tool_count = Some(value);
+        self
+    }
+
     pub fn tool_load(mut self, value: ConnectionToolLoad) -> Self {
         self.tool_load = Some(value);
         self
@@ -174,6 +182,7 @@ impl ConnectionBuilder {
             revocation: self.revocation.ok_or_else(|| BuildError::missing_field("revocation"))?,
             slug: self.slug.ok_or_else(|| BuildError::missing_field("slug"))?,
             status: self.status.ok_or_else(|| BuildError::missing_field("status"))?,
+            tool_count: self.tool_count,
             tool_load: self.tool_load,
             tools: self.tools.ok_or_else(|| BuildError::missing_field("tools"))?,
             used_by: self.used_by,

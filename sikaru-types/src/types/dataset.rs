@@ -2,7 +2,7 @@ pub use crate::prelude::*;
 #[allow(unused_imports)]
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct Dataset {
     #[serde(rename = "createdAt")]
     #[serde(default)]
@@ -19,7 +19,8 @@ pub struct Dataset {
     pub id: String,
     #[serde(default)]
     pub name: String,
-    pub purpose: DatasetPurpose,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<DatasetPurpose>,
     #[serde(rename = "updatedAt")]
     #[serde(default)]
     pub updated_at: String,
@@ -110,7 +111,6 @@ impl DatasetBuilder {
     /// - [`example_count`](DatasetBuilder::example_count)
     /// - [`id`](DatasetBuilder::id)
     /// - [`name`](DatasetBuilder::name)
-    /// - [`purpose`](DatasetBuilder::purpose)
     /// - [`updated_at`](DatasetBuilder::updated_at)
     /// - [`version`](DatasetBuilder::version)
     pub fn build(self) -> Result<Dataset, BuildError> {
@@ -121,7 +121,7 @@ impl DatasetBuilder {
             example_count: self.example_count.ok_or_else(|| BuildError::missing_field("example_count"))?,
             id: self.id.ok_or_else(|| BuildError::missing_field("id"))?,
             name: self.name.ok_or_else(|| BuildError::missing_field("name"))?,
-            purpose: self.purpose.ok_or_else(|| BuildError::missing_field("purpose"))?,
+            purpose: self.purpose,
             updated_at: self.updated_at.ok_or_else(|| BuildError::missing_field("updated_at"))?,
             used_by: self.used_by,
             version: self.version.ok_or_else(|| BuildError::missing_field("version"))?,

@@ -3095,6 +3095,21 @@ Pending Actions
 | `--project-id` | `string` | Yes |  |
 | `--run-id` | `string` | Yes |  |
 
+#### `sikaru runs record`
+
+Record input and output, optionally deduplicating retries with Idempotency-Key.
+
+Reusing a key with different content returns 409. No execution timing is
+inferred; the run is ordered by when Sikaru receives it.
+
+`POST /v1/projects/{project_id}/runs/record`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--idempotency-key` | `string` | No |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
 #### `sikaru runs recover`
 
 Recover Managed Run

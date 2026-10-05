@@ -2,8 +2,9 @@ pub use crate::prelude::*;
 #[allow(unused_imports)]
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct CaptureIntoNewRequest {
+    #[serde(default)]
     pub dataset: NewDataset,
     #[serde(default)]
     pub idempotency_key: String,

@@ -5,7 +5,7 @@
 //!
 //! ## Type Categories
 //!
-//! - **Request/Response Types**: 178 types for API operations
+//! - **Request/Response Types**: 179 types for API operations
 //! - **Model Types**: 320 types for data representation
 
 pub mod http_channels_http_message_privacy;
@@ -442,6 +442,7 @@ pub mod create_git_credential;
 pub mod grant_git_credential;
 pub mod improvement_input;
 pub mod start_harness_run_request;
+pub mod record_run_request;
 pub mod submit_tool_result_request;
 pub mod create_import_session_request;
 pub mod create_compatibility_profile_request;
@@ -941,6 +942,7 @@ pub use create_git_credential::CreateGitCredential;
 pub use grant_git_credential::GrantGitCredential;
 pub use improvement_input::ImprovementInput;
 pub use start_harness_run_request::StartHarnessRunRequest;
+pub use record_run_request::RecordRunRequest;
 pub use submit_tool_result_request::SubmitToolResultRequest;
 pub use create_import_session_request::CreateImportSessionRequest;
 pub use create_compatibility_profile_request::CreateCompatibilityProfileRequest;

@@ -2,11 +2,12 @@ pub use crate::prelude::*;
 #[allow(unused_imports)]
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash)]
 pub struct NewDataset {
     #[serde(default)]
     pub name: String,
-    pub purpose: NewDatasetPurpose,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<NewDatasetPurpose>,
 }
 
 impl NewDataset {
@@ -36,11 +37,10 @@ impl NewDatasetBuilder {
     /// Consumes the builder and constructs a [`NewDataset`].
     /// This method will fail if any of the following fields are not set:
     /// - [`name`](NewDatasetBuilder::name)
-    /// - [`purpose`](NewDatasetBuilder::purpose)
     pub fn build(self) -> Result<NewDataset, BuildError> {
         Ok(NewDataset {
             name: self.name.ok_or_else(|| BuildError::missing_field("name"))?,
-            purpose: self.purpose.ok_or_else(|| BuildError::missing_field("purpose"))?,
+            purpose: self.purpose,
         })
     }
 }
