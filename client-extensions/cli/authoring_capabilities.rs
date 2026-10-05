@@ -435,6 +435,24 @@ fn explicitly_enabled(stated: &Value, reach: &Reach, tool: &str) -> bool {
     named && setting.is_some_and(|setting| setting.enabled && setting.policy != Policy::Deny)
 }
 
+/// Tools every agent's sandbox needs, with their labels: no definition turns them off.
+const REQUIRED_TOOLS: [(&str, &str); 2] = [("bash", "Code execution"), ("workspace", "Workspace files")];
+
+/// Off, denied, or (for workspace, where every file read and write would wait) behind approval.
+fn required_tool_off(tool: &str, setting: &ToolSetting) -> bool {
+    let gated = tool == "workspace" && setting.policy == Policy::RequireApproval;
+    !setting.enabled || setting.policy == Policy::Deny || gated
+}
+
+fn required_tool_violations(reach: &Reach) -> Vec<Value> {
+    REQUIRED_TOOLS.iter()
+        .filter(|(tool, _)| reach.tools.setting(tool).is_some_and(|setting| required_tool_off(tool, setting)))
+        .map(|(tool, label)| violation("required_tools", tool, &format!("tools.{tool}"), format!(
+            "{label} (tools.{tool}) can't be turned off, denied, or (for workspace) need approval: every agent runs code \
+             in its own sandbox workspace. Remove tools.{tool} from the definition.")))
+        .collect()
+}
+
 fn tool_violations(definition: &Value, reach: &Reach, ceilings: &Ceilings) -> Vec<Value> {
     let stated = definition.get("tools").cloned().unwrap_or(Value::Null);
     ceilings.disallowed_tools.iter()
@@ -462,6 +480,12 @@ fn git_host_violations(hosts: &[String], ceilings: &Ceilings) -> Vec<Value> {
         .collect()
 }
 
+/// Settings the service rejects for every project, ceilings or not: today, turning the
+/// sandbox (bash or workspace) off.
+pub fn definition_violations(definition: &Value) -> Result<Vec<Value>, String> {
+    Ok(required_tool_violations(&parse(definition)?))
+}
+
 /// Every way the definition's declared reach exceeds the project's ceilings. `ceilings` is
 /// either the ceilings object or the `{ceilings, canEdit}` view the API returns.
 pub fn violations(definition: &Value, ceilings: &Value) -> Result<Vec<Value>, String> {
@@ -476,6 +500,7 @@ pub fn violations(definition: &Value, ceilings: &Value) -> Result<Vec<Value>, St
         .map(|repo| repo_host(&repo.url))
         .collect::<Result<Vec<_>, _>>()?;
     Ok([
+        required_tool_violations(&reach),
         egress_violations(&reach, &ceilings),
         denied(
             &reach.web.allow_domains,

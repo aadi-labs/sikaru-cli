@@ -309,12 +309,12 @@ fn ceiling_violations_name_each_explicit_conflict() {
     let definition = serde_json::json!({
         "schema": "sikaru.agent.contract.v1",
         "web": {"allow_domains": ["api.tracker.example", "docs.example.com"]},
-        "tools": {"bash": {"policy": "allow"}, "memory": {"policy": "deny"}},
+        "tools": {"bash": {"policy": "allow"}, "memory": {"policy": "allow"}},
         "setup": {"commands": ["make deps"],
                   "repos": [{"url": "https://git.internal.example/team/app", "path": "app"}]}});
     let ceilings = serde_json::json!({
         "egressEnabled": false, "domainDenylist": ["*.tracker.example"],
-        "disallowedTools": ["bash", "memory", "web_fetch"], "allowedGitHosts": ["git.example.com"]});
+        "disallowedTools": ["memory", "web_fetch"], "allowedGitHosts": ["git.example.com"]});
     let pair = |c: &str, f: &str| (c.to_owned(), f.to_owned());
     assert_eq!(
         violation_pairs(definition, ceilings),
@@ -322,10 +322,26 @@ fn ceiling_violations_name_each_explicit_conflict() {
             pair("egress", "setup.commands"),
             pair("egress", "setup.repos"),
             pair("domain_denylist", "web.allow_domains"),
-            pair("disallowed_tools", "tools.bash"),
+            pair("disallowed_tools", "tools.memory"),
             pair("allowed_git_hosts", "setup.repos"),
         ]
     );
+}
+
+#[test]
+fn turning_off_a_sandbox_tool_violates_even_without_ceilings() {
+    let pair = |c: &str, f: &str| (c.to_owned(), f.to_owned());
+    for (tools, field) in [
+        (serde_json::json!({"bash": {"enabled": false}}), "tools.bash"),
+        (serde_json::json!({"bash": {"policy": "deny"}}), "tools.bash"),
+        (serde_json::json!({"workspace": {"policy": "require_approval"}}), "tools.workspace"),
+    ] {
+        let definition = serde_json::json!({"schema": "sikaru.agent.contract.v1", "tools": tools});
+        assert_eq!(violation_pairs(definition, serde_json::json!({})), vec![pair("required_tools", field)]);
+    }
+    let approval = serde_json::json!({"schema": "sikaru.agent.contract.v1",
+        "tools": {"bash": {"policy": "require_approval"}}});
+    assert!(violation_pairs(approval, serde_json::json!({})).is_empty());
 }
 
 #[test]
@@ -338,11 +354,11 @@ fn reach_left_unset_never_violates_a_ceiling() {
 
 #[test]
 fn check_reports_ceiling_violations_and_fails() {
-    let temp = agent_with(serde_json::json!({"tools": {"bash": {"enabled": true}}}));
+    let temp = agent_with(serde_json::json!({"tools": {"memory": {"enabled": true}}}));
     let ceilings = temp.path().join("ceilings.json");
     fs::write(
         &ceilings,
-        r#"{"ceilings":{"disallowedTools":["bash"]},"canEdit":false}"#,
+        r#"{"ceilings":{"disallowedTools":["memory"]},"canEdit":false}"#,
     )
     .unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_sikaru-authoring"))
@@ -360,10 +376,10 @@ fn check_reports_ceiling_violations_and_fails() {
         report["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("tools.bash"),
+            .contains("tools.memory"),
         "{report}"
     );
-    fs::write(&ceilings, r#"{"disallowedTools":["memory"]}"#).unwrap();
+    fs::write(&ceilings, r#"{"disallowedTools":["web_fetch"]}"#).unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_sikaru-authoring"))
         .args([
             "check",
@@ -399,4 +415,22 @@ fn init_capabilities_flag_selects_the_scaffold() {
     };
     assert!(manifest(&plain).get("web").is_none());
     assert_eq!(manifest(&scaffolded)["web"]["provider"], "sikaru");
+}
+
+#[test]
+fn check_rejects_a_disabled_sandbox_without_ceilings() {
+    use fern_cli_sdk::{app::CliApp, openapi::OpenApiBinding};
+    let run = |dir: &std::path::Path| {
+        authoring::install(
+            CliApp::new("sikaru-authoring")
+                .binding(OpenApiBinding::new().commands(commands::description())),
+        )
+        .try_run_from(["sikaru-authoring", "check", dir.to_str().unwrap()])
+    };
+    let off = agent_with(serde_json::json!({"tools": {"bash": {"enabled": false}}}));
+    assert_ne!(run(off.path()), 0);
+    let approval = agent_with(serde_json::json!({"tools": {"bash": {"policy": "require_approval"}}}));
+    assert_eq!(run(approval.path()), 0);
+    assert!(authoring::definition_violations(&serde_json::json!({
+        "schema": "sikaru.agent.contract.v1", "tools": {"memory": {"enabled": false}}})).unwrap().is_empty());
 }

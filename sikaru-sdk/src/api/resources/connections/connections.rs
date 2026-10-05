@@ -564,6 +564,16 @@ impl ConnectionsClient {
             .await
     }
 
+    /// Retry loading tools. Tools load automatically after sign-in and on creation; the outcome is recorded in `tool_load`.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -689,6 +699,9 @@ impl ConnectionsClient {
     ///         .events(
     ///             &"project_id".to_string(),
     ///             &"connection_id".to_string(),
+    ///             &ConnectionsEventsQueryRequest {
+    ///                 ..Default::default()
+    ///             },
     ///             None,
     ///         )
     ///         .await;
@@ -698,8 +711,9 @@ impl ConnectionsClient {
         &self,
         project_id: &str,
         connection_id: &str,
+        request: &ConnectionsEventsQueryRequest,
         options: Option<RequestOptions>,
-    ) -> Result<Vec<ConnectionEvent>, ApiError> {
+    ) -> Result<ConnectionEventPage, ApiError> {
         let endpoint_auth_headers = self
             .http_client
             .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
@@ -719,7 +733,10 @@ impl ConnectionsClient {
                     project_id, connection_id
                 ),
                 None,
-                None,
+                QueryBuilder::new()
+                    .serialize("cursor", request.cursor.clone())
+                    .int("limit", request.limit.clone())
+                    .build(),
                 options,
             )
             .await

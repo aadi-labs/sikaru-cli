@@ -2,6 +2,10 @@
 
 ## 0.2.13
 
+- Compatibility: subscription commands move from `harnesses` to `organizations` and take an organization ID.
+- Create and version datasets, capture permitted run content, upload examples, and export examples as NDJSON.
+- Preview dataset checks, run eligible examples against an agent, and read check results.
+- Compatibility: remove the former agent-budget operations; manage credits and spending caps in the dashboard.
 - Create managed agents with an initial HTTP or Slack channel, manage channel bindings, and inspect delivery status.
 - Invoke HTTP channels and poll their receipts using a channel credential, separately from the project API key.
 - Manage personal channel connections, approvals, files, and Slack identity links.

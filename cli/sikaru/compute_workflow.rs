@@ -554,7 +554,7 @@ async fn product_output(c: &ApiClient, project: &str, run: &str) -> Result<(Valu
         let page = call(c.runs.events(
             project,
             run,
-            &EventsQueryRequest {
+            &RunsEventsQueryRequest {
                 after: Some(after.to_string()),
                 limit: Some("100".into()),
             },

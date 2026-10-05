@@ -4,6 +4,7 @@
 //!
 //! - **Auth**
 //! - **HttpChannels**
+//! - **Organizations**
 //! - **PersonalChannels**
 //! - **Activation**
 //! - **AgentDocuments**
@@ -21,9 +22,9 @@
 //! - **Connections**
 //! - **ContextRegistry**
 //! - **Conversations**
+//! - **Datasets**
 //! - **Deployments**
 //! - **Environments**
-//! - **EvalSeeds**
 //! - **EvaluationComparisons**
 //! - **EvaluationCriteria**
 //! - **EvaluationJobs**
@@ -35,8 +36,6 @@
 //! - **Executions**
 //! - **Feedback**
 //! - **GitCredentials**
-//! - **HarnessVersions**
-//! - **AgentBudgets**
 //! - **Harnesses**
 //! - **Runs**
 //! - **ImportSessions**
@@ -51,6 +50,7 @@
 //! - **ReleaseWatches**
 //! - **RetentionPolicies**
 //! - **ReviewQueue**
+//! - **RunReferences**
 //! - **RunSchedules**
 //! - **RunWebhooks**
 //! - **Sessions**
@@ -65,7 +65,6 @@
 use crate::{ApiError, ClientConfig};
 
 pub mod activation;
-pub mod agent_budgets;
 pub mod agent_documents;
 pub mod agent_imports;
 pub mod agents;
@@ -83,9 +82,9 @@ pub mod compute_workspaces;
 pub mod connections;
 pub mod context_registry;
 pub mod conversations;
+pub mod datasets;
 pub mod deployments;
 pub mod environments;
-pub mod eval_seeds;
 pub mod evaluation_comparisons;
 pub mod evaluation_criteria;
 pub mod evaluation_jobs;
@@ -96,7 +95,6 @@ pub mod execution_sessions;
 pub mod executions;
 pub mod feedback;
 pub mod git_credentials;
-pub mod harness_versions;
 pub mod harnesses;
 pub mod http_channels;
 pub mod import_sessions;
@@ -107,10 +105,12 @@ pub mod memory_registry;
 pub mod model_gateway;
 pub mod model_settings;
 pub mod online_evaluations;
+pub mod organizations;
 pub mod personal_channels;
 pub mod release_watches;
 pub mod retention_policies;
 pub mod review_queue;
+pub mod run_references;
 pub mod run_schedules;
 pub mod run_webhooks;
 pub mod runs;
@@ -127,6 +127,7 @@ pub struct ApiClient {
     pub config: ClientConfig,
     pub auth: AuthClient,
     pub http_channels: HttpChannelsClient,
+    pub organizations: OrganizationsClient,
     pub personal_channels: PersonalChannelsClient,
     pub activation: ActivationClient,
     pub agent_documents: AgentDocumentsClient,
@@ -144,9 +145,9 @@ pub struct ApiClient {
     pub connections: ConnectionsClient,
     pub context_registry: ContextRegistryClient,
     pub conversations: ConversationsClient,
+    pub datasets: DatasetsClient,
     pub deployments: DeploymentsClient,
     pub environments: EnvironmentsClient,
-    pub eval_seeds: EvalSeedsClient,
     pub evaluation_comparisons: EvaluationComparisonsClient,
     pub evaluation_criteria: EvaluationCriteriaClient,
     pub evaluation_jobs: EvaluationJobsClient,
@@ -158,8 +159,6 @@ pub struct ApiClient {
     pub executions: ExecutionsClient,
     pub feedback: FeedbackClient,
     pub git_credentials: GitCredentialsClient,
-    pub harness_versions: HarnessVersionsClient,
-    pub agent_budgets: AgentBudgetsClient,
     pub harnesses: HarnessesClient,
     pub runs: RunsClient,
     pub import_sessions: ImportSessionsClient,
@@ -174,6 +173,7 @@ pub struct ApiClient {
     pub release_watches: ReleaseWatchesClient,
     pub retention_policies: RetentionPoliciesClient,
     pub review_queue: ReviewQueueClient,
+    pub run_references: RunReferencesClient,
     pub run_schedules: RunSchedulesClient,
     pub run_webhooks: RunWebhooksClient,
     pub sessions: SessionsClient,
@@ -192,6 +192,7 @@ impl ApiClient {
             config: config.clone(),
             auth: AuthClient::new(config.clone())?,
             http_channels: HttpChannelsClient::new(config.clone())?,
+            organizations: OrganizationsClient::new(config.clone())?,
             personal_channels: PersonalChannelsClient::new(config.clone())?,
             activation: ActivationClient::new(config.clone())?,
             agent_documents: AgentDocumentsClient::new(config.clone())?,
@@ -209,9 +210,9 @@ impl ApiClient {
             connections: ConnectionsClient::new(config.clone())?,
             context_registry: ContextRegistryClient::new(config.clone())?,
             conversations: ConversationsClient::new(config.clone())?,
+            datasets: DatasetsClient::new(config.clone())?,
             deployments: DeploymentsClient::new(config.clone())?,
             environments: EnvironmentsClient::new(config.clone())?,
-            eval_seeds: EvalSeedsClient::new(config.clone())?,
             evaluation_comparisons: EvaluationComparisonsClient::new(config.clone())?,
             evaluation_criteria: EvaluationCriteriaClient::new(config.clone())?,
             evaluation_jobs: EvaluationJobsClient::new(config.clone())?,
@@ -223,8 +224,6 @@ impl ApiClient {
             executions: ExecutionsClient::new(config.clone())?,
             feedback: FeedbackClient::new(config.clone())?,
             git_credentials: GitCredentialsClient::new(config.clone())?,
-            harness_versions: HarnessVersionsClient::new(config.clone())?,
-            agent_budgets: AgentBudgetsClient::new(config.clone())?,
             harnesses: HarnessesClient::new(config.clone())?,
             runs: RunsClient::new(config.clone())?,
             import_sessions: ImportSessionsClient::new(config.clone())?,
@@ -239,6 +238,7 @@ impl ApiClient {
             release_watches: ReleaseWatchesClient::new(config.clone())?,
             retention_policies: RetentionPoliciesClient::new(config.clone())?,
             review_queue: ReviewQueueClient::new(config.clone())?,
+            run_references: RunReferencesClient::new(config.clone())?,
             run_schedules: RunSchedulesClient::new(config.clone())?,
             run_webhooks: RunWebhooksClient::new(config.clone())?,
             sessions: SessionsClient::new(config.clone())?,
@@ -254,7 +254,6 @@ impl ApiClient {
 }
 
 pub use activation::ActivationClient;
-pub use agent_budgets::AgentBudgetsClient;
 pub use agent_documents::AgentDocumentsClient;
 pub use agent_imports::AgentImportsClient;
 pub use agents::AgentsClient;
@@ -272,9 +271,9 @@ pub use compute_workspaces::ComputeWorkspacesClient;
 pub use connections::ConnectionsClient;
 pub use context_registry::ContextRegistryClient;
 pub use conversations::ConversationsClient;
+pub use datasets::DatasetsClient;
 pub use deployments::DeploymentsClient;
 pub use environments::EnvironmentsClient;
-pub use eval_seeds::EvalSeedsClient;
 pub use evaluation_comparisons::EvaluationComparisonsClient;
 pub use evaluation_criteria::EvaluationCriteriaClient;
 pub use evaluation_jobs::EvaluationJobsClient;
@@ -285,7 +284,6 @@ pub use execution_sessions::ExecutionSessionsClient;
 pub use executions::ExecutionsClient;
 pub use feedback::FeedbackClient;
 pub use git_credentials::GitCredentialsClient;
-pub use harness_versions::HarnessVersionsClient;
 pub use harnesses::HarnessesClient;
 pub use http_channels::HttpChannelsClient;
 pub use import_sessions::ImportSessionsClient;
@@ -296,10 +294,12 @@ pub use memory_registry::MemoryRegistryClient;
 pub use model_gateway::ModelGatewayClient;
 pub use model_settings::ModelSettingsClient;
 pub use online_evaluations::OnlineEvaluationsClient;
+pub use organizations::OrganizationsClient;
 pub use personal_channels::PersonalChannelsClient;
 pub use release_watches::ReleaseWatchesClient;
 pub use retention_policies::RetentionPoliciesClient;
 pub use review_queue::ReviewQueueClient;
+pub use run_references::RunReferencesClient;
 pub use run_schedules::RunSchedulesClient;
 pub use run_webhooks::RunWebhooksClient;
 pub use runs::RunsClient;

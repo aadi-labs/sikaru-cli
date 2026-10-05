@@ -12,7 +12,7 @@ env.SIKARU_API_KEY = "local-validation-only";
 function run(args) {
   const result = spawnSync(binary, args, { env, encoding: "utf8", timeout: 15_000 });
   if (result.error) throw result.error;
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, `${args.join(" ")}: ${result.stderr || result.stdout}`);
   return result.stdout;
 }
 for (const flag of ["--spec", "--spec-raw"]) {
@@ -24,8 +24,8 @@ for (const flag of ["--spec", "--spec-raw"]) {
   assert.match(error.error.message, /no binding has an embedded API spec/);
 }
 const help = run(["--help"]);
-for (const command of ["agents", "execution-sessions", "runs", "tool-providers", "agent-budgets", "specialists"]) {
-  assert.ok(help.includes(command));
+for (const command of ["agents", "execution-sessions", "runs", "tool-providers", "datasets", "specialists"]) {
+  assert.ok(help.includes(command), `Missing command: ${command}`);
   assert.match(run([command, "--help"]), /Commands:/);
 }
 assert.match(run(["runs", "start", "--help"]), /--project-id/);
@@ -34,18 +34,19 @@ const preview = run(["runs", "get", "--project-id", "project_example", "--run-id
 assert.ok(preview.includes("project_example"));
 assert.ok(preview.includes("run_example"));
 for (const [resource, methods] of Object.entries({
-  "agent-budgets": ["get", "add", "configure_auto_reload", "setup_payment_method"],
+  "datasets": ["create_dataset", "get_dataset", "export_dataset", "upload_examples", "start_dataset_checks"],
   "specialists": ["list", "get", "message", "cancel"],
-  "harnesses": ["get_subscription", "subscribe", "change_subscription", "cancel_subscription"],
+  "organizations": ["get_subscription", "subscribe", "change_subscription", "cancel_subscription"],
   "execution-sessions": ["spend"],
 })) {
   for (const method of methods) {
     assert.doesNotThrow(() => JSON.parse(run([resource, method, "--schema"])));
   }
 }
-const funding = run(["agent-budgets", "add", "--project-id", "project_example", "--harness-id", "agent_example",
-  "--amount-usd", "5.00", "--idempotency-key", "local-funding-check", "--base-url", "http://127.0.0.1:1", "--dry-run", "--format", "json"]);
-assert.ok(funding.includes("local-funding-check"));
+assert.ok(!help.includes("agent-budgets"));
+const dataset = run(["datasets", "get_dataset", "--project-id", "project_example", "--dataset-id", "dataset_example",
+  "--base-url", "http://127.0.0.1:1", "--dry-run", "--format", "json"]);
+assert.ok(dataset.includes("dataset_example"));
 if (process.platform !== "win32") {
   assert.match(run(["exec", "--help"]), /--resume/);
   assert.match(run(["compute", "serve", "--help"]), /--bootstrap/);

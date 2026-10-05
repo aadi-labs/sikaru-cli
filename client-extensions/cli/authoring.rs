@@ -19,6 +19,7 @@ use std::{
 #[path = "authoring_capabilities.rs"]
 mod capabilities;
 pub use capabilities::violations as ceiling_violations;
+pub use capabilities::definition_violations;
 
 fn invalid(message: impl ToString) -> CliError {
     CliError::Validation(message.to_string())
@@ -269,26 +270,33 @@ fn init(matches: &ArgMatches, _: &AppContext) -> Result<(), CliError> {
 }
 fn check(matches: &ArgMatches, _: &AppContext) -> Result<(), CliError> {
     let package = package(directory(matches))?;
-    if let Some(path) = matches.get_one::<String>("ceilings") {
-        let ceilings =
-            serde_json::from_slice(&fs::read(path).map_err(invalid)?).map_err(invalid)?;
-        let found = ceiling_violations(&package["definition"], &ceilings).map_err(invalid)?;
-        if !found.is_empty() {
-            let reasons: Vec<_> = found
-                .iter()
-                .map(|v| {
-                    format!(
-                        "{}: {}",
-                        v["field"].as_str().unwrap_or(""),
-                        v["message"].as_str().unwrap_or("")
-                    )
-                })
-                .collect();
-            return Err(invalid(format!(
-                "The definition exceeds the project capability ceilings. {}",
-                reasons.join("; ")
-            )));
+    let definition = &package["definition"];
+    let found = match matches.get_one::<String>("ceilings") {
+        Some(path) => {
+            let ceilings =
+                serde_json::from_slice(&fs::read(path).map_err(invalid)?).map_err(invalid)?;
+            ceiling_violations(definition, &ceilings).map_err(invalid)?
         }
+        // The sandbox rule holds for every project, so it is checked without ceilings too.
+        None => definition_violations(definition).map_err(invalid)?,
+    };
+    if !found.is_empty() {
+        let reasons: Vec<_> = found
+            .iter()
+            .map(|v| {
+                format!(
+                    "{}: {}",
+                    v["field"].as_str().unwrap_or(""),
+                    v["message"].as_str().unwrap_or("")
+                )
+            })
+            .collect();
+        let lead = if matches.get_one::<String>("ceilings").is_some() {
+            "The definition exceeds the project capability ceilings."
+        } else {
+            "The definition can't be published."
+        };
+        return Err(invalid(format!("{lead} {}", reasons.join("; "))));
     }
     println!(
         "{}",

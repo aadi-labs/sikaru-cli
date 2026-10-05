@@ -20,6 +20,8 @@ pub struct Check {
     pub latest_result: Option<CheckResult>,
     #[serde(default)]
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<CheckSource>,
     pub verification: CheckVerification,
 }
 
@@ -39,6 +41,7 @@ pub struct CheckBuilder {
     instruction: Option<String>,
     latest_result: Option<CheckResult>,
     name: Option<String>,
+    source: Option<CheckSource>,
     verification: Option<CheckVerification>,
 }
 
@@ -78,6 +81,11 @@ impl CheckBuilder {
         self
     }
 
+    pub fn source(mut self, value: CheckSource) -> Self {
+        self.source = Some(value);
+        self
+    }
+
     pub fn verification(mut self, value: CheckVerification) -> Self {
         self.verification = Some(value);
         self
@@ -101,6 +109,7 @@ impl CheckBuilder {
             instruction: self.instruction.ok_or_else(|| BuildError::missing_field("instruction"))?,
             latest_result: self.latest_result,
             name: self.name.ok_or_else(|| BuildError::missing_field("name"))?,
+            source: self.source,
             verification: self.verification.ok_or_else(|| BuildError::missing_field("verification"))?,
         })
     }

@@ -242,7 +242,7 @@ impl RunsClient {
     ///         .events(
     ///             &"project_id".to_string(),
     ///             &"run_id".to_string(),
-    ///             &EventsQueryRequest {
+    ///             &RunsEventsQueryRequest {
     ///                 ..Default::default()
     ///             },
     ///             None,
@@ -254,7 +254,7 @@ impl RunsClient {
         &self,
         project_id: &str,
         run_id: &str,
-        request: &EventsQueryRequest,
+        request: &RunsEventsQueryRequest,
         options: Option<RequestOptions>,
     ) -> Result<RunEvents, ApiError> {
         let endpoint_auth_headers = self
