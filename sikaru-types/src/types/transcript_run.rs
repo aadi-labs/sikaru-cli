@@ -17,6 +17,8 @@ pub struct TranscriptRun {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
     pub environment: TranscriptRunEnvironment,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<RunError>,
     #[serde(rename = "harnessVersionId")]
     #[serde(default)]
     pub harness_version_id: String,
@@ -53,6 +55,7 @@ pub struct TranscriptRunBuilder {
     content_visible: Option<bool>,
     conversation_id: Option<String>,
     environment: Option<TranscriptRunEnvironment>,
+    error: Option<RunError>,
     harness_version_id: Option<String>,
     id: Option<String>,
     name: Option<String>,
@@ -86,6 +89,11 @@ impl TranscriptRunBuilder {
 
     pub fn environment(mut self, value: TranscriptRunEnvironment) -> Self {
         self.environment = Some(value);
+        self
+    }
+
+    pub fn error(mut self, value: RunError) -> Self {
+        self.error = Some(value);
         self
     }
 
@@ -146,6 +154,7 @@ impl TranscriptRunBuilder {
             content_visible: self.content_visible,
             conversation_id: self.conversation_id,
             environment: self.environment.ok_or_else(|| BuildError::missing_field("environment"))?,
+            error: self.error,
             harness_version_id: self.harness_version_id.ok_or_else(|| BuildError::missing_field("harness_version_id"))?,
             id: self.id.ok_or_else(|| BuildError::missing_field("id"))?,
             name: self.name.ok_or_else(|| BuildError::missing_field("name"))?,

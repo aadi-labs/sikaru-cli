@@ -452,7 +452,7 @@ impl RunsClient {
         run_id: &str,
         request: &RecoverRunRequest,
         options: Option<RequestOptions>,
-    ) -> Result<HashMap<String, serde_json::Value>, ApiError> {
+    ) -> Result<ManagedRun, ApiError> {
         let endpoint_auth_headers = self
             .http_client
             .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
@@ -470,6 +470,67 @@ impl RunsClient {
                 Method::POST,
                 &format!("v1/projects/{}/runs/{}/recover", project_id, run_id),
                 Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// Retry a failed turn as a new turn with its own run ID; the failed run stays failed. The retry
+    /// starts from the session's last completed turn, and external effects the failed turn already
+    /// completed are not repeated. Repeating the request returns the same retry. A run that did not
+    /// fail, whose `error.recoverable` is false, or that failed too long ago is refused with 409
+    /// `not_retryable`.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .runs
+    ///         .retry(&"project_id".to_string(), &"run_id".to_string(), None)
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn retry(
+        &self,
+        project_id: &str,
+        run_id: &str,
+        options: Option<RequestOptions>,
+    ) -> Result<ExecutionTurnResponse, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::POST,
+                &format!("v1/projects/{}/runs/{}/retry", project_id, run_id),
+                None,
                 None,
                 options,
             )

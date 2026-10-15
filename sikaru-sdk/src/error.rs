@@ -3,34 +3,51 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ApiError {
-    #[error("UnprocessableEntityError: Unprocessable entity - {message}")]
-    UnprocessableEntityError {
-        message: String,
-        detail: Option<Vec<ValidationError>>,
-    },
     #[error("UnauthorizedError: Authentication failed - {message}")]
     UnauthorizedError {
         message: String,
+        code: Option<String>,
         detail: Option<String>,
     },
     #[error("ForbiddenError: Access forbidden - {message}")]
     ForbiddenError {
         message: String,
+        code: Option<String>,
         detail: Option<String>,
     },
     #[error("NotFoundError: Resource not found - {message}")]
     NotFoundError {
         message: String,
+        code: Option<String>,
         detail: Option<String>,
+    },
+    #[error("UnprocessableEntityError: Unprocessable entity - {message}")]
+    UnprocessableEntityError {
+        message: String,
+        detail: Option<Vec<ValidationError>>,
     },
     #[error("ConflictError: Conflict - {message}")]
     ConflictError {
         message: String,
+        code: Option<String>,
         detail: Option<String>,
     },
     #[error("ServiceUnavailableError: {message}")]
     ServiceUnavailableError {
         message: String,
+        code: Option<String>,
+        detail: Option<String>,
+    },
+    #[error("PaymentRequiredError: {message}")]
+    PaymentRequiredError {
+        message: String,
+        code: Option<String>,
+        detail: Option<String>,
+    },
+    #[error("TooManyRequestsError: Rate limit exceeded - {message}")]
+    TooManyRequestsError {
+        message: String,
+        code: Option<String>,
         detail: Option<String>,
     },
     #[error("HTTP error {status}: {message}")]
@@ -58,6 +75,81 @@ pub enum ApiError {
 impl ApiError {
     pub fn from_response(status_code: u16, body: Option<&str>) -> Self {
         match status_code {
+            401 => {
+                // Parse error body for UnauthorizedError;
+                if let Some(body_str) = body {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_str) {
+                        return Self::UnauthorizedError {
+                            message: parsed
+                                .get("message")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown error")
+                                .to_string(),
+                            code: parsed
+                                .get("code")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            detail: parsed
+                                .get("detail")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                        };
+                    }
+                }
+                return Self::UnauthorizedError {
+                    message: body.unwrap_or("Unknown error").to_string(),
+                    code: None,
+                    detail: None,
+                };
+            }
+            403 => {
+                // Parse error body for ForbiddenError;
+                if let Some(body_str) = body {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_str) {
+                        return Self::ForbiddenError {
+                            message: parsed
+                                .get("message")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown error")
+                                .to_string(),
+                            code: parsed
+                                .get("code")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            detail: parsed
+                                .get("detail")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                        };
+                    }
+                }
+                return Self::ForbiddenError {
+                    message: body.unwrap_or("Unknown error").to_string(),
+                    code: None,
+                    detail: None,
+                };
+            }
+            404 => {
+                // Parse error body for NotFoundError;
+                if let Some(body_str) = body {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_str) {
+                        return Self::NotFoundError {
+                            message: parsed
+                                .get("message")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown error")
+                                .to_string(),
+                            code: parsed
+                                .get("code")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            detail: parsed
+                                .get("detail")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                        };
+                    }
+                }
+                return Self::NotFoundError {
+                    message: body.unwrap_or("Unknown error").to_string(),
+                    code: None,
+                    detail: None,
+                };
+            }
             422 => {
                 // Parse error body for UnprocessableEntityError;
                 if let Some(body_str) = body {
@@ -79,69 +171,6 @@ impl ApiError {
                     detail: None,
                 };
             }
-            401 => {
-                // Parse error body for UnauthorizedError;
-                if let Some(body_str) = body {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_str) {
-                        return Self::UnauthorizedError {
-                            message: parsed
-                                .get("message")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("Unknown error")
-                                .to_string(),
-                            detail: parsed
-                                .get("detail")
-                                .and_then(|v| v.as_str().map(|s| s.to_string())),
-                        };
-                    }
-                }
-                return Self::UnauthorizedError {
-                    message: body.unwrap_or("Unknown error").to_string(),
-                    detail: None,
-                };
-            }
-            403 => {
-                // Parse error body for ForbiddenError;
-                if let Some(body_str) = body {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_str) {
-                        return Self::ForbiddenError {
-                            message: parsed
-                                .get("message")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("Unknown error")
-                                .to_string(),
-                            detail: parsed
-                                .get("detail")
-                                .and_then(|v| v.as_str().map(|s| s.to_string())),
-                        };
-                    }
-                }
-                return Self::ForbiddenError {
-                    message: body.unwrap_or("Unknown error").to_string(),
-                    detail: None,
-                };
-            }
-            404 => {
-                // Parse error body for NotFoundError;
-                if let Some(body_str) = body {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_str) {
-                        return Self::NotFoundError {
-                            message: parsed
-                                .get("message")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("Unknown error")
-                                .to_string(),
-                            detail: parsed
-                                .get("detail")
-                                .and_then(|v| v.as_str().map(|s| s.to_string())),
-                        };
-                    }
-                }
-                return Self::NotFoundError {
-                    message: body.unwrap_or("Unknown error").to_string(),
-                    detail: None,
-                };
-            }
             409 => {
                 // Parse error body for ConflictError;
                 if let Some(body_str) = body {
@@ -152,6 +181,9 @@ impl ApiError {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("Unknown error")
                                 .to_string(),
+                            code: parsed
+                                .get("code")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
                             detail: parsed
                                 .get("detail")
                                 .and_then(|v| v.as_str().map(|s| s.to_string())),
@@ -160,6 +192,7 @@ impl ApiError {
                 }
                 return Self::ConflictError {
                     message: body.unwrap_or("Unknown error").to_string(),
+                    code: None,
                     detail: None,
                 };
             }
@@ -173,6 +206,9 @@ impl ApiError {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("Unknown error")
                                 .to_string(),
+                            code: parsed
+                                .get("code")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
                             detail: parsed
                                 .get("detail")
                                 .and_then(|v| v.as_str().map(|s| s.to_string())),
@@ -181,6 +217,57 @@ impl ApiError {
                 }
                 return Self::ServiceUnavailableError {
                     message: body.unwrap_or("Unknown error").to_string(),
+                    code: None,
+                    detail: None,
+                };
+            }
+            402 => {
+                // Parse error body for PaymentRequiredError;
+                if let Some(body_str) = body {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_str) {
+                        return Self::PaymentRequiredError {
+                            message: parsed
+                                .get("message")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown error")
+                                .to_string(),
+                            code: parsed
+                                .get("code")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            detail: parsed
+                                .get("detail")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                        };
+                    }
+                }
+                return Self::PaymentRequiredError {
+                    message: body.unwrap_or("Unknown error").to_string(),
+                    code: None,
+                    detail: None,
+                };
+            }
+            429 => {
+                // Parse error body for TooManyRequestsError;
+                if let Some(body_str) = body {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body_str) {
+                        return Self::TooManyRequestsError {
+                            message: parsed
+                                .get("message")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown error")
+                                .to_string(),
+                            code: parsed
+                                .get("code")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            detail: parsed
+                                .get("detail")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
+                        };
+                    }
+                }
+                return Self::TooManyRequestsError {
+                    message: body.unwrap_or("Unknown error").to_string(),
+                    code: None,
                     detail: None,
                 };
             }

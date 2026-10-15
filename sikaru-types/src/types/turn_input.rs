@@ -16,6 +16,9 @@ pub struct TurnInput {
     pub idempotency_key: String,
     #[serde(default)]
     pub input: HashMap<String, serde_json::Value>,
+    /// Set a release pin for new turns; explicit null resumes following promotions. Omit to preserve policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_generation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub product_context: Option<HashMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -39,6 +42,7 @@ pub struct TurnInputBuilder {
     file_ids: Option<Vec<String>>,
     idempotency_key: Option<String>,
     input: Option<HashMap<String, serde_json::Value>>,
+    pinned_generation_id: Option<String>,
     product_context: Option<HashMap<String, serde_json::Value>>,
     run_mode: Option<TurnInputRunMode>,
     tool_provider_refs: Option<Vec<HashMap<String, serde_json::Value>>>,
@@ -75,6 +79,11 @@ impl TurnInputBuilder {
         self
     }
 
+    pub fn pinned_generation_id(mut self, value: impl Into<String>) -> Self {
+        self.pinned_generation_id = Some(value.into());
+        self
+    }
+
     pub fn product_context(mut self, value: HashMap<String, serde_json::Value>) -> Self {
         self.product_context = Some(value);
         self
@@ -102,6 +111,7 @@ impl TurnInputBuilder {
             file_ids: self.file_ids,
             idempotency_key: self.idempotency_key.ok_or_else(|| BuildError::missing_field("idempotency_key"))?,
             input: self.input.ok_or_else(|| BuildError::missing_field("input"))?,
+            pinned_generation_id: self.pinned_generation_id,
             product_context: self.product_context,
             run_mode: self.run_mode,
             tool_provider_refs: self.tool_provider_refs,

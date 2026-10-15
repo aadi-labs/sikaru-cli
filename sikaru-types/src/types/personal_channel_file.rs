@@ -23,9 +23,6 @@ pub struct PersonalChannelFile {
     pub sha256: String,
     #[serde(default)]
     pub size: i64,
-    #[serde(rename = "snapshotDigest")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub snapshot_digest: Option<String>,
     #[serde(rename = "sourceRunId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_run_id: Option<String>,
@@ -48,7 +45,6 @@ pub struct PersonalChannelFileBuilder {
     path: Option<String>,
     sha256: Option<String>,
     size: Option<i64>,
-    snapshot_digest: Option<String>,
     source_run_id: Option<String>,
 }
 
@@ -93,11 +89,6 @@ impl PersonalChannelFileBuilder {
         self
     }
 
-    pub fn snapshot_digest(mut self, value: impl Into<String>) -> Self {
-        self.snapshot_digest = Some(value.into());
-        self
-    }
-
     pub fn source_run_id(mut self, value: impl Into<String>) -> Self {
         self.source_run_id = Some(value.into());
         self
@@ -123,7 +114,6 @@ impl PersonalChannelFileBuilder {
             path: self.path.ok_or_else(|| BuildError::missing_field("path"))?,
             sha256: self.sha256.ok_or_else(|| BuildError::missing_field("sha256"))?,
             size: self.size.ok_or_else(|| BuildError::missing_field("size"))?,
-            snapshot_digest: self.snapshot_digest,
             source_run_id: self.source_run_id,
         })
     }

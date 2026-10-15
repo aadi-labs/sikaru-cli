@@ -30,8 +30,6 @@ pub struct Binding {
     pub personal_access: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recipient_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shared_tenant_id: Option<String>,
     #[serde(default)]
     pub status: String,
     pub transport: BindingTransport,
@@ -59,7 +57,6 @@ pub struct BindingBuilder {
     per_minute: Option<i64>,
     personal_access: Option<bool>,
     recipient_id: Option<String>,
-    shared_tenant_id: Option<String>,
     status: Option<String>,
     transport: Option<BindingTransport>,
 }
@@ -130,11 +127,6 @@ impl BindingBuilder {
         self
     }
 
-    pub fn shared_tenant_id(mut self, value: impl Into<String>) -> Self {
-        self.shared_tenant_id = Some(value.into());
-        self
-    }
-
     pub fn status(mut self, value: impl Into<String>) -> Self {
         self.status = Some(value.into());
         self
@@ -167,7 +159,6 @@ impl BindingBuilder {
             per_minute: self.per_minute,
             personal_access: self.personal_access,
             recipient_id: self.recipient_id,
-            shared_tenant_id: self.shared_tenant_id,
             status: self.status.ok_or_else(|| BuildError::missing_field("status"))?,
             transport: self.transport.ok_or_else(|| BuildError::missing_field("transport"))?,
         })

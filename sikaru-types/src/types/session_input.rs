@@ -26,6 +26,9 @@ pub struct SessionInput {
     /// Default model for this session. Use a Sikaru model catalog ID, such as kimi-k3. Omit to inherit the project default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Optional previously serving release generation. Omit to follow promotions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_generation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<SessionInputReasoningEffort>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -52,6 +55,7 @@ pub struct SessionInputBuilder {
     final_output_schema: Option<HashMap<String, serde_json::Value>>,
     idempotency_key: Option<String>,
     model: Option<String>,
+    pinned_generation_id: Option<String>,
     reasoning_effort: Option<SessionInputReasoningEffort>,
     tenant_id: Option<String>,
     user_id: Option<String>,
@@ -103,6 +107,11 @@ impl SessionInputBuilder {
         self
     }
 
+    pub fn pinned_generation_id(mut self, value: impl Into<String>) -> Self {
+        self.pinned_generation_id = Some(value.into());
+        self
+    }
+
     pub fn reasoning_effort(mut self, value: SessionInputReasoningEffort) -> Self {
         self.reasoning_effort = Some(value);
         self
@@ -130,6 +139,7 @@ impl SessionInputBuilder {
             final_output_schema: self.final_output_schema,
             idempotency_key: self.idempotency_key,
             model: self.model,
+            pinned_generation_id: self.pinned_generation_id,
             reasoning_effort: self.reasoning_effort,
             tenant_id: self.tenant_id,
             user_id: self.user_id,

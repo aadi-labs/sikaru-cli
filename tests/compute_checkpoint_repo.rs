@@ -108,8 +108,8 @@ fn ignore_rules_apply_and_tracked_ignored_paths_are_dropped() {
     assert!(tree.keys().all(|p| !p.starts_with(".git/")));
     assert!(tree.contains_key(".gitignore"));
     assert!(
-        tree.contains_key(".env.example"),
-        "credential templates are published"
+        !tree.contains_key(".env.example"),
+        "credential templates are never published"
     );
 }
 

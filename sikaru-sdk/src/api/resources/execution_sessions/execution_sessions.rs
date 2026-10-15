@@ -496,6 +496,7 @@ impl ExecutionSessionsClient {
     ///                 compute_attachment_id: None,
     ///                 delivery_mode: None,
     ///                 file_ids: None,
+    ///                 pinned_generation_id: None,
     ///                 product_context: None,
     ///                 run_mode: None,
     ///                 tool_provider_refs: None,
@@ -591,6 +592,75 @@ impl ExecutionSessionsClient {
                 ),
                 Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
                 None,
+                options,
+            )
+            .await
+    }
+
+    /// List release identities eligible for an optional session pin.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .execution_sessions
+    ///         .list_eligible_releases(
+    ///             &"project_id".to_string(),
+    ///             &"harness_id".to_string(),
+    ///             &ListEligibleReleasesQueryRequest {
+    ///                 ..Default::default()
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn list_eligible_releases(
+        &self,
+        project_id: &str,
+        harness_id: &str,
+        request: &ListEligibleReleasesQueryRequest,
+        options: Option<RequestOptions>,
+    ) -> Result<EligibleReleases, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::GET,
+                &format!(
+                    "v1/projects/{}/harnesses/{}/releases",
+                    project_id, harness_id
+                ),
+                None,
+                QueryBuilder::new()
+                    .serialize("environment", request.environment.clone())
+                    .build(),
                 options,
             )
             .await

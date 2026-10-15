@@ -1992,6 +1992,18 @@ List Sessions
 | `--limit` | `integer` | No |  |
 | `--agent-slug` | `string` | No |  |
 
+#### `sikaru execution-sessions list-eligible-releases`
+
+List release identities eligible for an optional session pin.
+
+`GET /v1/projects/{project_id}/harnesses/{harness_id}/releases`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--harness-id` | `string` | Yes |  |
+| `--environment` | `production | staging` | No |  |
+
 #### `sikaru execution-sessions list-files`
 
 List Files
@@ -3121,6 +3133,21 @@ Recover Managed Run
 | `--project-id` | `string` | Yes |  |
 | `--run-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru runs retry`
+
+Retry a failed turn as a new turn with its own run ID; the failed run stays failed. The retry
+starts from the session's last completed turn, and external effects the failed turn already
+completed are not repeated. Repeating the request returns the same retry. A run that did not
+fail, whose `error.recoverable` is false, or that failed too long ago is refused with 409
+`not_retryable`.
+
+`POST /v1/projects/{project_id}/runs/{run_id}/retry`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--run-id` | `string` | Yes |  |
 
 #### `sikaru runs start`
 

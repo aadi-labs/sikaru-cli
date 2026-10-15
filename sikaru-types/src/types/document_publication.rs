@@ -38,6 +38,9 @@ pub struct DocumentPublication {
     #[serde(rename = "priorVersionId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prior_version_id: Option<String>,
+    #[serde(rename = "publicationStatus")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication_status: Option<DocumentPublicationPublicationStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,6 +68,7 @@ pub struct DocumentPublicationBuilder {
     earlier_sessions: Option<Vec<EarlierDocumentSession>>,
     harness_version_id: Option<String>,
     prior_version_id: Option<String>,
+    publication_status: Option<DocumentPublicationPublicationStatus>,
     revision: Option<i64>,
     unchanged: Option<bool>,
 }
@@ -130,6 +134,11 @@ impl DocumentPublicationBuilder {
         self
     }
 
+    pub fn publication_status(mut self, value: DocumentPublicationPublicationStatus) -> Self {
+        self.publication_status = Some(value);
+        self
+    }
+
     pub fn revision(mut self, value: i64) -> Self {
         self.revision = Some(value);
         self
@@ -162,6 +171,7 @@ impl DocumentPublicationBuilder {
             earlier_sessions: self.earlier_sessions.ok_or_else(|| BuildError::missing_field("earlier_sessions"))?,
             harness_version_id: self.harness_version_id.ok_or_else(|| BuildError::missing_field("harness_version_id"))?,
             prior_version_id: self.prior_version_id,
+            publication_status: self.publication_status,
             revision: self.revision,
             unchanged: self.unchanged,
         })

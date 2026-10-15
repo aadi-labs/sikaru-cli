@@ -24,6 +24,8 @@ pub struct ManagedAgentView {
     #[serde(rename = "organizationId")]
     #[serde(default)]
     pub organization_id: String,
+    #[serde(default)]
+    pub personal: bool,
     #[serde(rename = "projectId")]
     #[serde(default)]
     pub project_id: String,
@@ -47,6 +49,7 @@ pub struct ManagedAgentViewBuilder {
     harness_id: Option<String>,
     id: Option<String>,
     organization_id: Option<String>,
+    personal: Option<bool>,
     project_id: Option<String>,
     status: Option<String>,
 }
@@ -87,6 +90,11 @@ impl ManagedAgentViewBuilder {
         self
     }
 
+    pub fn personal(mut self, value: bool) -> Self {
+        self.personal = Some(value);
+        self
+    }
+
     pub fn project_id(mut self, value: impl Into<String>) -> Self {
         self.project_id = Some(value.into());
         self
@@ -105,6 +113,7 @@ impl ManagedAgentViewBuilder {
     /// - [`harness_id`](ManagedAgentViewBuilder::harness_id)
     /// - [`id`](ManagedAgentViewBuilder::id)
     /// - [`organization_id`](ManagedAgentViewBuilder::organization_id)
+    /// - [`personal`](ManagedAgentViewBuilder::personal)
     /// - [`project_id`](ManagedAgentViewBuilder::project_id)
     /// - [`status`](ManagedAgentViewBuilder::status)
     pub fn build(self) -> Result<ManagedAgentView, BuildError> {
@@ -116,6 +125,7 @@ impl ManagedAgentViewBuilder {
             harness_id: self.harness_id.ok_or_else(|| BuildError::missing_field("harness_id"))?,
             id: self.id.ok_or_else(|| BuildError::missing_field("id"))?,
             organization_id: self.organization_id.ok_or_else(|| BuildError::missing_field("organization_id"))?,
+            personal: self.personal.ok_or_else(|| BuildError::missing_field("personal"))?,
             project_id: self.project_id.ok_or_else(|| BuildError::missing_field("project_id"))?,
             status: self.status.ok_or_else(|| BuildError::missing_field("status"))?,
         })

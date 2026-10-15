@@ -46,6 +46,9 @@ pub struct ExecutionSessionRecord {
     pub next_turn: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub personal: Option<bool>,
+    #[serde(rename = "pinnedGenerationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned_generation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
     #[serde(rename = "projectId")]
@@ -83,6 +86,7 @@ pub struct ExecutionSessionRecordBuilder {
     model_id: Option<String>,
     next_turn: Option<i64>,
     personal: Option<bool>,
+    pinned_generation_id: Option<String>,
     preview: Option<String>,
     project_id: Option<String>,
     reasoning_effort: Option<String>,
@@ -164,6 +168,11 @@ impl ExecutionSessionRecordBuilder {
         self
     }
 
+    pub fn pinned_generation_id(mut self, value: impl Into<String>) -> Self {
+        self.pinned_generation_id = Some(value.into());
+        self
+    }
+
     pub fn preview(mut self, value: impl Into<String>) -> Self {
         self.preview = Some(value.into());
         self
@@ -204,6 +213,7 @@ impl ExecutionSessionRecordBuilder {
             model_id: self.model_id,
             next_turn: self.next_turn.ok_or_else(|| BuildError::missing_field("next_turn"))?,
             personal: self.personal,
+            pinned_generation_id: self.pinned_generation_id,
             preview: self.preview,
             project_id: self.project_id.ok_or_else(|| BuildError::missing_field("project_id"))?,
             reasoning_effort: self.reasoning_effort,

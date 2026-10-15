@@ -549,7 +549,7 @@ mod wire {
         ] {
             assert!(!tree.contains_key(absent), "{absent}");
         }
-        assert!(tree.contains_key(".env.example"));
+        assert!(!tree.contains_key(".env.example"));
         assert!(tree.values().all(|mode| mode != "160000"));
         let s = l.oracle.state.lock().unwrap();
         assert_eq!(s.records.len(), 1);

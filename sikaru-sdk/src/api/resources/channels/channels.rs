@@ -407,7 +407,6 @@ impl ChannelsClient {
     ///             &PersonalAccess {
     ///                 enabled: true,
     ///                 identity_app_ids: None,
-    ///                 shared_tenant_id: None,
     ///             },
     ///             None,
     ///         )

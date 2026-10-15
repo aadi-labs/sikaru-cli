@@ -22,6 +22,9 @@ pub struct CreateManagedAgentRequest {
     #[serde(rename = "initialChannel")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_channel: Option<CreateManagedAgentRequestInitialChannel>,
+    /// Fixed at creation; new agents are shared unless set. A personal agent's conversations stay private to the person who runs them. Omit it to keep an existing agent's choice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<CreateManagedAgentSourceRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -43,6 +46,7 @@ pub struct CreateManagedAgentRequestBuilder {
     display_name: Option<String>,
     harness_id: Option<String>,
     initial_channel: Option<CreateManagedAgentRequestInitialChannel>,
+    personal: Option<bool>,
     source: Option<CreateManagedAgentSourceRequest>,
     status: Option<CreateManagedAgentRequestStatus>,
 }
@@ -78,6 +82,11 @@ impl CreateManagedAgentRequestBuilder {
         self
     }
 
+    pub fn personal(mut self, value: bool) -> Self {
+        self.personal = Some(value);
+        self
+    }
+
     pub fn source(mut self, value: CreateManagedAgentSourceRequest) -> Self {
         self.source = Some(value);
         self
@@ -99,6 +108,7 @@ impl CreateManagedAgentRequestBuilder {
             display_name: self.display_name,
             harness_id: self.harness_id,
             initial_channel: self.initial_channel,
+            personal: self.personal,
             source: self.source,
             status: self.status,
         })

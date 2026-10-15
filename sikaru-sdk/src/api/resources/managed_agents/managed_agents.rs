@@ -82,6 +82,7 @@ impl ManagedAgentsClient {
     ///                 display_name: None,
     ///                 harness_id: None,
     ///                 initial_channel: None,
+    ///                 personal: None,
     ///                 source: None,
     ///                 status: None,
     ///             },

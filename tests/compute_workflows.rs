@@ -232,8 +232,8 @@ mod workflow {
     impl Oracle {
         fn fault(&self, path: &str) -> Option<ResponseTemplate> {
             match (self.scenario, path.rsplit('/').next().unwrap()) {
-                ("release", "execution-sessions") => Some(ResponseTemplate::new(409).set_body_json(json!({"detail":"agent_release_unavailable", "message":"secret-remote-body"}))),
-                ("conflict", "execution-sessions") => Some(ResponseTemplate::new(409).set_body_json(json!({"detail":"different_conflict", "message":"secret-remote-body"}))),
+                ("release", "execution-sessions") => Some(ResponseTemplate::new(409).set_body_json(json!({"detail":"This agent has no release that can run.", "code":"release_unavailable", "message":"secret-remote-body"}))),
+                ("conflict", "execution-sessions") => Some(ResponseTemplate::new(409).set_body_json(json!({"detail":"Different conflict.", "code":"state_conflict", "message":"secret-remote-body"}))),
                 ("billing", "execution-sessions") => {
                     Some(ResponseTemplate::new(402).set_body_string("secret-provider-token"))
                 }

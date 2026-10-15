@@ -15,21 +15,21 @@ pub async fn session_admission<T>(
         .map_err(|_| anyhow::Error::new(TransportFailure::Transient))?
         .map_err(|error| match &error {
             sikaru_sdk::ApiError::ConflictError {
-                detail: Some(detail),
+                code: Some(code),
                 ..
-            } if detail == "agent_release_unavailable" => anyhow::Error::new(UnavailableRelease),
+            } if code == "release_unavailable" => anyhow::Error::new(UnavailableRelease),
             sikaru_sdk::ApiError::Http {
                 status: 409,
                 message,
-            } if unavailable_detail(message) => anyhow::Error::new(UnavailableRelease),
+            } if unavailable_release_code(message) => anyhow::Error::new(UnavailableRelease),
             _ => super::transport::classify(error),
         })
 }
 
-fn unavailable_detail(body: &str) -> bool {
+fn unavailable_release_code(body: &str) -> bool {
     serde_json::from_str::<Value>(body)
         .ok()
-        .is_some_and(|value| value["detail"] == "agent_release_unavailable")
+        .is_some_and(|value| value["code"] == "release_unavailable")
 }
 
 pub fn failure(error: &anyhow::Error, reason: &str) -> Value {

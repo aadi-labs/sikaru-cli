@@ -8,8 +8,6 @@ pub struct PersonalAccessConfiguration {
     pub enabled: bool,
     #[serde(default)]
     pub identity_app_ids: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shared_tenant_id: Option<String>,
 }
 
 impl PersonalAccessConfiguration {
@@ -23,7 +21,6 @@ impl PersonalAccessConfiguration {
 pub struct PersonalAccessConfigurationBuilder {
     enabled: Option<bool>,
     identity_app_ids: Option<Vec<String>>,
-    shared_tenant_id: Option<String>,
 }
 
 impl PersonalAccessConfigurationBuilder {
@@ -37,11 +34,6 @@ impl PersonalAccessConfigurationBuilder {
         self
     }
 
-    pub fn shared_tenant_id(mut self, value: impl Into<String>) -> Self {
-        self.shared_tenant_id = Some(value.into());
-        self
-    }
-
     /// Consumes the builder and constructs a [`PersonalAccessConfiguration`].
     /// This method will fail if any of the following fields are not set:
     /// - [`enabled`](PersonalAccessConfigurationBuilder::enabled)
@@ -50,7 +42,6 @@ impl PersonalAccessConfigurationBuilder {
         Ok(PersonalAccessConfiguration {
             enabled: self.enabled.ok_or_else(|| BuildError::missing_field("enabled"))?,
             identity_app_ids: self.identity_app_ids.ok_or_else(|| BuildError::missing_field("identity_app_ids"))?,
-            shared_tenant_id: self.shared_tenant_id,
         })
     }
 }

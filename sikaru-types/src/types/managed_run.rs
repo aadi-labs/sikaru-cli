@@ -18,6 +18,9 @@ pub struct ManagedRun {
     #[serde(rename = "costSummary")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_summary: Option<HashMap<String, serde_json::Value>>,
+    /// Why the run failed; set when `status` is `failed`, otherwise null. Omitted when `contentVisible` is false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<RunError>,
     #[serde(rename = "eventsUrl")]
     #[serde(default)]
     pub events_url: String,
@@ -56,6 +59,7 @@ pub struct ManagedRunBuilder {
     connections: Option<Vec<PersonalConnectionPrompt>>,
     content_visible: Option<bool>,
     cost_summary: Option<HashMap<String, serde_json::Value>>,
+    error: Option<RunError>,
     events_url: Option<String>,
     harness_id: Option<String>,
     harness_version_id: Option<String>,
@@ -89,6 +93,11 @@ impl ManagedRunBuilder {
 
     pub fn cost_summary(mut self, value: HashMap<String, serde_json::Value>) -> Self {
         self.cost_summary = Some(value);
+        self
+    }
+
+    pub fn error(mut self, value: RunError) -> Self {
+        self.error = Some(value);
         self
     }
 
@@ -146,6 +155,7 @@ impl ManagedRunBuilder {
             connections: self.connections,
             content_visible: self.content_visible,
             cost_summary: self.cost_summary,
+            error: self.error,
             events_url: self.events_url.ok_or_else(|| BuildError::missing_field("events_url"))?,
             harness_id: self.harness_id.ok_or_else(|| BuildError::missing_field("harness_id"))?,
             harness_version_id: self.harness_version_id.ok_or_else(|| BuildError::missing_field("harness_version_id"))?,
