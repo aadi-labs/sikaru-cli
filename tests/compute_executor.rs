@@ -35,7 +35,7 @@ mod git_remote;
 
 #[cfg(unix)]
 mod wire {
-    use super::git_remote::{self, Faults, GitRemote};
+    use super::git_remote::{self, WorkspaceUploads};
     use serde_json::{json, Value};
     use std::{
         process::Stdio,
@@ -46,7 +46,7 @@ mod wire {
     use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
     #[derive(Default)]
     struct State {
-        remote_mints: usize,
+        policy_reads: usize,
         records: Vec<Value>,
         order: Vec<&'static str>,
         lease_lost: bool,
@@ -87,7 +87,7 @@ mod wire {
         state: Arc<Mutex<State>>,
         scenario: &'static str,
         effect: std::path::PathBuf,
-        git: Option<Arc<GitRemote>>,
+        git: Option<Arc<WorkspaceUploads>>,
     }
     fn attachment(status: &str, ttl: u64) -> Value {
         json!({"id":"attachment","session_id":"session","project_id":"project","environment_id":"environment","provider_id":"provider",
@@ -120,8 +120,33 @@ mod wire {
             if let Some(response) = self.fault(&mut state, path, &body) {
                 return response;
             }
-            if path.ends_with("/workspace-remote") {
-                return self.workspace_remote(&mut state);
+            if path.ends_with("/workspace-policy") {
+                if state.lease_lost {
+                    return ResponseTemplate::new(409)
+                        .set_body_json(json!({"detail":"lease_expired"}));
+                }
+                if self.git.is_some() {
+                    assert!(request
+                        .url
+                        .query_pairs()
+                        .any(|(k, v)| k == "run_id" && v == "run"));
+                }
+                state.policy_reads += 1;
+                return match &self.git {
+                    Some(_) => ok(
+                        json!({"ignore":git_remote::IGNORE_DEFAULTS,"credentials":[".env", "*.pem"]}),
+                    ),
+                    None => ResponseTemplate::new(404),
+                };
+            }
+            if path.ends_with("/workspace-content") {
+                if self.scenario == "content_size_mismatch" {
+                    use sha2::{Digest, Sha256};
+                    return ok(
+                        json!({"sha256":format!("{:x}",Sha256::digest(&request.body)), "size":request.body.len()+1}),
+                    );
+                }
+                return self.git.as_ref().unwrap().upload(&request.body);
             }
             if path.ends_with("/workspace-checkpoints") {
                 return self.record_checkpoint(&mut state, &body);
@@ -160,33 +185,15 @@ mod wire {
                 assert_eq!(observations[0]["handle_id"], s.handle);
                 assert_eq!(observations[0]["status"], "exited");
             }
+            self.git
+                .as_ref()
+                .unwrap()
+                .record(body["manifest_digest"].as_str().unwrap());
             s.records.push(body.clone());
             ok(
-                json!({"commit_sha":body["commit_sha"],"branch":git_remote::BRANCH,"recorded_at":"2026-09-29T00:00:00Z"}),
+                json!({"commit_sha":body["manifest_digest"],"branch":git_remote::BRANCH,"recorded_at":"2026-09-29T00:00:00Z"}),
             )
         }
-        fn workspace_remote(&self, s: &mut State) -> ResponseTemplate {
-            let Some(git) = &self.git else {
-                return ResponseTemplate::new(404);
-            };
-            if s.lease_lost {
-                // Minting needs a valid lease.
-                return ResponseTemplate::new(409).set_body_json(json!({"detail":"lease_expired"}));
-            }
-            s.remote_mints += 1;
-            let lifetime = if self.scenario == "git_token_near_expiry" && s.remote_mints == 1 {
-                10
-            } else {
-                900
-            };
-            ok(
-                json!({"remote_url":git.url(),"username":"x-token","token":format!("token-{}",s.remote_mints),
-                "branch":git_remote::BRANCH,"head_sha":git.head(),"ignore_defaults":git_remote::IGNORE_DEFAULTS,
-                "expires_at":git_remote::rfc3339(git_remote::unix_now()+lifetime),
-                "max_push_bytes":if self.scenario == "git_split" {200_000} else {100_000_000}}),
-            )
-        }
-
         fn fault(&self, s: &mut State, path: &str, body: &Value) -> Option<ResponseTemplate> {
             if self.credential_revoked() {
                 return Some(ResponseTemplate::new(401));
@@ -388,23 +395,6 @@ mod wire {
         oracle: Oracle,
         base_url: String,
     }
-    fn git_faults(scenario: &str) -> Faults {
-        match scenario {
-            "git_token_expiry" => Faults {
-                refuse_first_token: true,
-                ..Faults::default()
-            },
-            "git_stale" => Faults {
-                race_first_push: true,
-                ..Faults::default()
-            },
-            "git_slow_push" => Faults {
-                push_delay: Some(Duration::from_secs(20)),
-                ..Faults::default()
-            },
-            _ => Faults::default(),
-        }
-    }
     fn prepare_workspace(scenario: &str, ws: &std::path::Path) {
         match scenario {
             "git_task_repo" | "git_force_added" => git_remote::task_repository(ws),
@@ -426,8 +416,15 @@ mod wire {
         let path = root.path().canonicalize().unwrap();
         std::fs::create_dir(path.join("workspace")).unwrap();
         prepare_workspace(scenario, &path.join("workspace"));
-        let git = match scenario.starts_with("git_") {
-            true => Some(Arc::new(GitRemote::start(git_faults(scenario)).await)),
+        let git = match scenario.starts_with("git_") || scenario.starts_with("content_") {
+            true => Some(Arc::new(WorkspaceUploads::new(
+                if scenario == "git_slow_push" {
+                    Some(Duration::from_secs(20))
+                } else {
+                    None
+                },
+                scenario == "content_mismatch",
+            ))),
             false => None,
         };
         let server = MockServer::start().await;
@@ -494,7 +491,7 @@ mod wire {
         assert!(l.oracle.git.as_ref().unwrap().head().is_some());
     }
     #[tokio::test]
-    async fn git_checkpoint_pushes_the_working_tree_without_touching_the_task_repository() {
+    async fn manifest_checkpoint_preserves_working_tree_and_task_repository() {
         let l = prepare_launch("git_task_repo").await;
         let ws = l.path.join("workspace");
         let before = git_remote::snapshot(&ws.join(".git"));
@@ -525,10 +522,6 @@ mod wire {
             events[2]["skipped"]["link_outside_workspace"], 2,
             "escaping links are skipped, not fatal"
         );
-        assert!(
-            git.parents(&head).is_empty(),
-            "the session branch holds the working tree, not the task history"
-        );
         let tree: std::collections::BTreeMap<_, _> = git
             .tree(&head)
             .into_iter()
@@ -553,7 +546,7 @@ mod wire {
         assert!(tree.values().all(|mode| mode != "160000"));
         let s = l.oracle.state.lock().unwrap();
         assert_eq!(s.records.len(), 1);
-        assert_eq!(s.records[0]["commit_sha"], head);
+        assert_eq!(s.records[0]["manifest_digest"], head);
         assert_eq!(s.records[0]["trigger"], "turn");
         assert_eq!(s.records[0]["run_id"], "run", "the completed run");
         assert_eq!(
@@ -563,145 +556,70 @@ mod wire {
         );
     }
     #[tokio::test]
-    async fn force_added_ignored_paths_never_reach_any_pushed_commit() {
+    async fn force_added_ignored_paths_never_reach_manifest() {
         let l = prepare_launch("git_force_added").await;
-        let output = result(start(&l).await).await;
-        completed(&output);
-        let ws = l.path.join("workspace");
-        let agent_commit = git_remote::text(git_remote::git(&ws, &["rev-parse", "HEAD"]));
+        completed(&result(start(&l).await).await);
         let git = l.oracle.git.as_ref().unwrap();
-        let reachable = git.reachable();
-        assert!(
-            !reachable.contains(&agent_commit),
-            "agent commits are not pushed as history"
-        );
-        for commit in &reachable {
-            assert!(
-                git.tree(commit)
-                    .iter()
-                    .all(|(_, path)| !path.starts_with(".venv/")),
-                "{commit}"
-            );
-        }
         let head = git.head().unwrap();
-        assert!(git
-            .tree(&head)
-            .iter()
-            .all(|(_, path)| !path.starts_with("node_modules/")));
+        assert!(git.tree(&head).iter().all(|(_, p)| !p.starts_with(".venv/")
+            && !p.starts_with("node_modules/")
+            && !p.starts_with(".git/")));
     }
     #[tokio::test]
-    async fn large_first_push_is_split_into_single_commit_pushes() {
+    async fn uploads_all_admitted_blobs_before_recording_manifest() {
         let l = prepare_launch("git_split").await;
         let output = result(start(&l).await).await;
         completed(&output);
         let git = l.oracle.git.as_ref().unwrap();
-        let seen = git.seen.lock().unwrap();
-        let accepted: Vec<_> = seen.pushes.iter().filter(|p| p.accepted).collect();
-        assert!(accepted.len() >= 2, "{}", accepted.len());
-        assert_eq!(
-            accepted.len(),
-            seen.pushes.len(),
-            "the service accepts every single-commit push"
-        );
-        assert!(
-            seen.pushes.iter().all(|p| p.body_bytes <= 200_000),
-            "{:?}",
-            seen.pushes.iter().map(|p| p.body_bytes).collect::<Vec<_>>()
-        );
-        for pair in accepted.windows(2) {
-            assert_eq!(
-                pair[1].old, pair[0].new,
-                "each push adds one commit on the previous head"
-            );
-            assert_eq!(git.parents(&pair[1].new), vec![pair[0].new.clone()]);
-        }
-        assert_eq!(accepted[0].old, git_remote::ZERO);
         let head = git.head().unwrap();
-        let tree: Vec<_> = git.tree(&head).into_iter().map(|(_, p)| p).collect();
-        assert_eq!(tree.iter().filter(|p| p.starts_with("part-")).count(), 6);
-        assert!(!tree.contains(&"huge.bin".to_owned()));
-        let pushed = lifecycle_events(&output)
-            .into_iter()
-            .find(|e| e["event"] == "checkpoint_pushed")
-            .unwrap();
-        assert_eq!(pushed["skipped"]["too_large"], 1);
-        let s = l.oracle.state.lock().unwrap();
-        assert_eq!(s.records.len(), 1, "only the final head is recorded");
-        assert_eq!(s.records[0]["commit_sha"], head);
-    }
-    #[tokio::test]
-    async fn moved_head_is_reparented_without_force() {
-        let l = prepare_launch("git_stale").await;
-        let output = result(start(&l).await).await;
-        completed(&output);
-        let git = l.oracle.git.as_ref().unwrap();
-        let seen = git.seen.lock().unwrap();
-        assert_eq!(seen.pushes.len(), 2);
-        assert!(!seen.pushes[0].accepted && seen.pushes[1].accepted);
-        let head = git.head().unwrap();
-        assert_eq!(git.parents(&head), vec![seen.pushes[1].old.clone()]);
-        assert!(
-            git.tree(&head).iter().all(|(_, p)| p != "other.txt"),
-            "the workspace state wins"
-        );
         assert_eq!(
-            l.oracle.state.lock().unwrap().records[0]["commit_sha"],
-            head
-        );
-    }
-    #[tokio::test]
-    async fn expired_token_is_reminted_and_the_push_retried() {
-        let l = prepare_launch("git_token_expiry").await;
-        completed(&result(start(&l).await).await);
-        let git = l.oracle.git.as_ref().unwrap();
-        let seen = git.seen.lock().unwrap();
-        assert_eq!(seen.unauthorized, 1);
-        assert_eq!(
-            seen.pushes
+            git.tree(&head)
                 .iter()
-                .filter(|p| p.accepted)
-                .map(|p| p.token.as_str())
-                .collect::<Vec<_>>(),
-            vec!["token-2"]
+                .filter(|(_, p)| p.starts_with("part-"))
+                .count(),
+            6
         );
         let s = l.oracle.state.lock().unwrap();
-        assert_eq!((s.remote_mints, s.records.len()), (2, 1));
+        assert_eq!(s.records.len(), 1);
+        assert_eq!(s.records[0]["manifest_digest"], head);
+        assert_eq!(head.len(), 64);
     }
     #[tokio::test]
-    async fn token_close_to_expiry_is_reminted_before_pushing() {
-        let l = prepare_launch("git_token_near_expiry").await;
-        completed(&result(start(&l).await).await);
-        let git = l.oracle.git.as_ref().unwrap();
-        let seen = git.seen.lock().unwrap();
-        assert_eq!(seen.unauthorized, 0);
-        assert!(seen.pushes.iter().all(|p| p.token == "token-2"));
-        assert_eq!(
-            l.oracle.state.lock().unwrap().remote_mints,
-            2,
-            "one re-mint before the push, no keeper spin"
-        );
+    async fn mismatched_upload_receipt_never_records_or_acknowledges_checkpoint() {
+        for scenario in ["content_mismatch", "content_size_mismatch"] {
+            let l = prepare_launch(scenario).await;
+            let output = result(start(&l).await).await;
+            completed(&output);
+            assert!(l.oracle.state.lock().unwrap().records.is_empty());
+            let events = lifecycle_events(&output);
+            assert!(events
+                .iter()
+                .any(|e| e["event"] == "checkpoint_failed" && e["reason"] == "content_mismatch"));
+            assert!(!events.iter().any(|e| e["event"] == "checkpoint_pushed"));
+        }
     }
     #[tokio::test]
-    async fn lease_loss_pushes_with_the_token_already_held() {
+    async fn expired_lease_cannot_upload_or_acknowledge_a_new_checkpoint() {
         let l = prepare_launch("git_lease_lost").await;
         let output = result(start(&l).await).await;
+        assert_eq!(output.status.code(), Some(4));
+        let state = l.oracle.state.lock().unwrap();
+        assert!(state.lease_lost);
+        assert!(state.records.is_empty());
         assert_eq!(
-            output.status.code(),
-            Some(4),
-            "lease loss still requires recovery"
+            l.oracle
+                .git
+                .as_ref()
+                .unwrap()
+                .seen
+                .lock()
+                .unwrap()
+                .uploads_started,
+            0
         );
-        let git = l.oracle.git.as_ref().unwrap();
-        assert!(
-            git.head().is_some(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let s = l.oracle.state.lock().unwrap();
-        assert_eq!(
-            s.remote_mints, 1,
-            "minted while the lease was valid, never after"
-        );
-        assert_eq!(s.records[0]["trigger"], "lease_lost");
+        let events = lifecycle_events(&output);
+        assert!(events.iter().any(|e| e["event"] == "checkpoint_failed"));
+        assert!(!events.iter().any(|e| e["event"] == "checkpoint_pushed"));
     }
     #[tokio::test]
     async fn a_refused_record_is_reported_without_changing_the_result() {
@@ -720,7 +638,7 @@ mod wire {
         let child = start(&l).await;
         let git = l.oracle.git.clone().unwrap();
         tokio::time::timeout(Duration::from_secs(20), async {
-            while git.seen.lock().unwrap().pushes_started == 0 {
+            while git.seen.lock().unwrap().uploads_started == 0 {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
         })
@@ -773,12 +691,12 @@ mod wire {
             vec![json!({"event":"checkpoint_skipped","reason":"disabled"})]
         );
         let state = l.oracle.state.lock().unwrap();
-        assert_eq!((state.remote_mints, state.records.len()), (0, 0));
+        assert_eq!((state.policy_reads, state.records.len()), (0, 0));
         assert!(state.cleanup.is_some());
         assert!(!l.path.join("state/workspace.git").exists());
         let git = l.oracle.git.as_ref().unwrap();
         assert!(git.head().is_none());
-        assert_eq!(git.seen.lock().unwrap().pushes_started, 0);
+        assert_eq!(git.seen.lock().unwrap().uploads_started, 0);
     }
     async fn spawn_executor(
         path: &std::path::Path,

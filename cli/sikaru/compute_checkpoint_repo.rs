@@ -11,13 +11,12 @@ use std::{
     },
 };
 
-pub const FILE: u32 = 0o100644;
+#[cfg(test)]
 pub const EXECUTABLE: u32 = 0o100755;
 pub const LINK: u32 = 0o120000;
 pub const GITLINK: u32 = 0o160000;
-/// The remote stores at most 32 MB per blob, whatever the pack budget allows.
+/// Maximum admitted content object size.
 const MAX_BLOB_BYTES: u64 = 32_000_000;
-const AUTHOR: &str = "Sikaru <checkpoints@sikaru.invalid>";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SkipReason {
@@ -34,14 +33,15 @@ pub struct Staged {
     pub tree: Oid,
     pub skipped: Vec<Skipped>,
 }
-pub struct Chain {
-    pub commits: Vec<Oid>,
-    pub parent: Option<Oid>,
-    pub skipped: Vec<Skipped>,
+pub struct Blob {
+    pub id: Oid,
+    pub sha256: String,
+    pub size: usize,
 }
-pub struct Pack {
-    pub bytes: Vec<u8>,
-    pub objects: usize,
+pub struct Snapshot {
+    pub manifest: Vec<u8>,
+    pub blobs: Vec<Blob>,
+    pub skipped: Vec<Skipped>,
 }
 /// Shared with the async caller: dropping its wait stops local checkpoint work.
 #[derive(Clone, Default)]
@@ -64,6 +64,7 @@ pub struct PrivateRepo {
 }
 
 impl PrivateRepo {
+    #[cfg(test)]
     pub fn open_or_init(git_dir: &Path, workspace: &Path) -> Result<Self> {
         Self::open_or_init_cancellable(git_dir, workspace, Cancellation::default())
     }
@@ -94,6 +95,7 @@ impl PrivateRepo {
         &self,
         ignore_defaults: &[String],
         private_dirs: &[PathBuf],
+        credentials: &[String],
     ) -> Result<()> {
         self.cancellation.check()?;
         let workspace = self
@@ -110,14 +112,8 @@ impl PrivateRepo {
             rules.push_str(pattern);
             rules.push('\n');
         }
-        for dir in private_dirs {
-            let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
-            if let Ok(relative) = dir.strip_prefix(&workspace) {
-                if !relative.as_os_str().is_empty() {
-                    rules.push_str(&anchored(relative));
-                }
-            }
-        }
+        rules.push_str(&private_rules(&workspace, private_dirs));
+        self.repo.add_ignore_rule(&credentials.join("\n"))?;
         let info = self.repo.path().join("info");
         std::fs::create_dir_all(&info)?;
         std::fs::write(info.join("exclude"), rules)?;
@@ -194,279 +190,56 @@ impl PrivateRepo {
         }
         Ok((self.repo.status_should_ignore(Path::new(path))?, None))
     }
-    pub fn has_commit(&self, oid: Oid) -> bool {
-        self.repo.find_commit(oid).is_ok()
-    }
-    pub fn chain(
-        &self,
-        head: Option<Oid>,
-        target: Oid,
-        budget: u64,
-        message: &str,
-    ) -> Result<Chain> {
-        self.cancellation.check()?;
-        anyhow::ensure!(budget >= 512, "checkpoint pack budget is too small");
-        let base = head
-            .and_then(|p| self.repo.find_commit(p).ok())
-            .map(|c| c.tree())
-            .transpose()?;
-        let mut chain = Chain {
-            commits: Vec::new(),
-            parent: head,
-            skipped: Vec::new(),
-        };
-        let (mut index, changes) =
-            self.changes(base.as_ref(), target, budget, &mut chain.skipped)?;
-        let context = Packing {
-            budget,
-            message,
-            hide: head.into_iter().collect(),
-        };
-        for batch in batches(changes, budget / 2) {
-            self.append_batch(&mut index, &batch, &context, &mut chain)?;
+    pub fn snapshot(&self) -> Result<Snapshot> {
+        let staged = self.stage()?;
+        let mut files = BTreeMap::new();
+        let mut blobs = Vec::new();
+        let mut skipped = staged.skipped;
+        for (path, (id, mode)) in
+            entries(Some(&self.repo.find_tree(staged.tree)?), &self.cancellation)?
+        {
+            self.capture_entry(path, id, mode, &mut files, &mut blobs, &mut skipped)?;
         }
-        self.append_final_tree(&mut index, &context, &mut chain)?;
-        Ok(chain)
+        Ok(Snapshot {
+            manifest: serde_json::to_vec(&serde_json::json!({"files": files}))?,
+            blobs,
+            skipped,
+        })
     }
-    fn changes(
-        &self,
-        base: Option<&Tree>,
-        target: Oid,
-        budget: u64,
-        skipped: &mut Vec<Skipped>,
-    ) -> Result<(git2::Index, Vec<Change>)> {
-        let before = entries(base, &self.cancellation)?;
-        let after = entries(Some(&self.repo.find_tree(target)?), &self.cancellation)?;
-        let mut index = git2::Index::new()?;
-        let mut changes = Vec::new();
-        for (path, (id, mode)) in after {
-            let Some(change) = self.sized_change(path, id, mode, budget, skipped)? else {
-                continue;
-            };
-            if before.get(&change.path) == Some(&(id, mode)) {
-                index.add(&change.entry())?;
-            } else {
-                changes.push(change);
-            }
-        }
-        Ok((index, changes))
-    }
-    fn sized_change(
+    fn capture_entry(
         &self,
         path: String,
         id: Oid,
         mode: u32,
-        budget: u64,
+        files: &mut BTreeMap<String, serde_json::Value>,
+        blobs: &mut Vec<Blob>,
         skipped: &mut Vec<Skipped>,
-    ) -> Result<Option<Change>> {
+    ) -> Result<()> {
+        use sha2::{Digest, Sha256};
         self.cancellation.check()?;
-        let size = self.repo.odb()?.read_header(id)?.0 as u64;
-        if size > budget.min(MAX_BLOB_BYTES) {
+        let blob = self.repo.find_blob(id)?;
+        if blob.size() as u64 > MAX_BLOB_BYTES {
             skipped.push(Skipped {
                 path,
                 reason: SkipReason::TooLarge,
             });
-            return Ok(None);
-        }
-        Ok(Some(Change {
-            path,
-            id,
-            mode,
-            size,
-        }))
-    }
-    fn append_batch(
-        &self,
-        index: &mut git2::Index,
-        batch: &[Change],
-        context: &Packing,
-        chain: &mut Chain,
-    ) -> Result<()> {
-        self.cancellation.check()?;
-        let before = index.write_tree_to(&self.repo)?;
-        let tree = self.stage_batch(index, batch)?;
-        if self.try_append(tree, context, chain)? {
             return Ok(());
         }
-        index.read_tree(&self.repo.find_tree(before)?)?;
-        self.split_batch(index, batch, context, chain)
-    }
-    fn stage_batch(&self, index: &mut git2::Index, batch: &[Change]) -> Result<Oid> {
-        for change in batch {
-            self.cancellation.check()?;
-            index.add(&change.entry())?;
-        }
-        Ok(index.write_tree_to(&self.repo)?)
-    }
-    fn split_batch(
-        &self,
-        index: &mut git2::Index,
-        batch: &[Change],
-        context: &Packing,
-        chain: &mut Chain,
-    ) -> Result<()> {
-        if batch.len() == 1 {
-            chain.skipped.push(Skipped {
-                path: batch[0].path.clone(),
-                reason: SkipReason::TooLarge,
-            });
-            return Ok(());
-        }
-        let middle = batch.len() / 2;
-        self.append_batch(index, &batch[..middle], context, chain)?;
-        self.append_batch(index, &batch[middle..], context, chain)
-    }
-    fn append_final_tree(
-        &self,
-        index: &mut git2::Index,
-        context: &Packing,
-        chain: &mut Chain,
-    ) -> Result<()> {
-        let tree = index.write_tree_to(&self.repo)?;
-        let parent = chain.commits.last().copied().or(chain.parent);
-        let unchanged = parent
-            .and_then(|p| self.repo.find_commit(p).ok())
-            .is_some_and(|p| p.tree_id() == tree);
-        if unchanged {
-            return Ok(());
-        }
-        anyhow::ensure!(
-            self.try_append(tree, context, chain)?,
-            "checkpoint tree exceeds pack budget"
-        );
-        Ok(())
-    }
-    fn try_append(&self, tree: Oid, context: &Packing, chain: &mut Chain) -> Result<bool> {
-        let parent = chain.commits.last().copied().or(chain.parent);
-        let commit = self.commit(tree, parent, context.message)?;
-        let mut hide = context.hide.clone();
-        if let Some(previous) = chain.commits.last() {
-            hide.push(*previous);
-        }
-        if self.pack(commit, &hide)?.bytes.len() as u64 > context.budget {
-            return Ok(false);
-        }
-        chain.commits.push(commit);
-        Ok(true)
-    }
-    /// A commit object written directly, so a parent need not exist locally.
-    fn commit(&self, tree: Oid, parent: Option<Oid>, message: &str) -> Result<Oid> {
-        self.cancellation.check()?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs();
-        let mut text = format!("tree {tree}\n");
-        if let Some(parent) = parent {
-            text.push_str(&format!("parent {parent}\n"));
-        }
-        text.push_str(&format!(
-            "author {AUTHOR} {now} +0000\ncommitter {AUTHOR} {now} +0000\n\n{message}\n"
-        ));
-        Ok(self
-            .repo
-            .odb()?
-            .write(ObjectType::Commit, text.as_bytes())?)
-    }
-    fn parents_available(&self, commit: Oid) -> Result<bool> {
-        let mut pending = vec![commit];
-        let mut seen = std::collections::HashSet::new();
-        while let Some(oid) = pending.pop() {
-            self.cancellation.check()?;
-            if !seen.insert(oid) {
-                continue;
-            }
-            let Ok(commit) = self.repo.find_commit(oid) else {
-                return Ok(false);
-            };
-            pending.extend(commit.parent_ids());
-        }
-        Ok(true)
-    }
-    pub fn pack(&self, commit: Oid, hide: &[Oid]) -> Result<Pack> {
-        self.cancellation.check()?;
-        let mut builder = self.repo.packbuilder()?;
-        builder.set_progress_callback(|_, _, _| !self.cancellation.cancelled())?;
-        if self.parents_available(commit)? {
-            self.insert_history(&mut builder, commit, hide)?;
+        let entry = if mode == LINK {
+            serde_json::json!({"link": std::str::from_utf8(blob.content())?})
         } else {
-            self.insert_reachable(&mut builder, commit, hide)?;
-        }
-        self.collect_pack(&mut builder)
-    }
-    fn insert_history(
-        &self,
-        builder: &mut git2::PackBuilder,
-        commit: Oid,
-        hide: &[Oid],
-    ) -> Result<()> {
-        let mut walk = self.repo.revwalk()?;
-        walk.push(commit)?;
-        for oid in hide.iter().filter(|oid| self.has_commit(**oid)) {
-            self.cancellation.check()?;
-            walk.hide(*oid)?;
-        }
-        builder.insert_walk(&mut walk)?;
+            let sha256 = format!("{:x}", Sha256::digest(blob.content()));
+            let size = blob.size();
+            let entry = serde_json::json!({"sha256": sha256, "size": size, "mode": mode & 0o777});
+            blobs.push(Blob { id, sha256, size });
+            entry
+        };
+        files.insert(path, entry);
         Ok(())
     }
-    fn insert_reachable(
-        &self,
-        builder: &mut git2::PackBuilder,
-        commit: Oid,
-        hide: &[Oid],
-    ) -> Result<()> {
-        let hidden = self.reachable(hide)?;
-        for oid in self.reachable(&[commit])?.difference(&hidden) {
-            self.cancellation.check()?;
-            builder.insert_object(*oid, None)?;
-        }
-        Ok(())
-    }
-    fn collect_pack(&self, builder: &mut git2::PackBuilder) -> Result<Pack> {
-        let mut bytes = Vec::new();
-        builder.foreach(|chunk| {
-            if self.cancellation.cancelled() {
-                return false;
-            }
-            bytes.extend_from_slice(chunk);
-            true
-        })?;
+    pub fn blob(&self, id: Oid) -> Result<Vec<u8>> {
         self.cancellation.check()?;
-        let objects = builder.object_count();
-        Ok(Pack { bytes, objects })
-    }
-    fn reachable(&self, roots: &[Oid]) -> Result<std::collections::BTreeSet<Oid>> {
-        let mut pending = roots.to_vec();
-        let mut objects = std::collections::BTreeSet::new();
-        while let Some(oid) = pending.pop() {
-            self.cancellation.check()?;
-            if objects.contains(&oid) {
-                continue;
-            }
-            let object = match self.repo.find_object(oid, None) {
-                Ok(object) => object,
-                Err(error) if error.code() == git2::ErrorCode::NotFound => continue,
-                Err(error) => return Err(error.into()),
-            };
-            objects.insert(oid);
-            if let Some(commit) = object.as_commit() {
-                pending.push(commit.tree_id());
-                pending.extend(commit.parent_ids());
-            }
-            if let Some(tree) = object.as_tree() {
-                pending.extend(
-                    tree.iter()
-                        .filter(|e| e.filemode() != GITLINK as i32)
-                        .map(|e| e.id()),
-                );
-            }
-        }
-        Ok(objects)
-    }
-    pub fn set_pushed(&self, refname: &str, commit: Oid) -> Result<()> {
-        self.cancellation.check()?;
-        self.repo
-            .reference(refname, commit, true, "checkpoint pushed")?;
-        Ok(())
+        Ok(self.repo.find_blob(id)?.content().to_vec())
     }
 }
 
@@ -515,22 +288,17 @@ fn entries(
     }
     Ok(out)
 }
-fn index_entry(path: &str, id: Oid, mode: u32, size: u64) -> git2::IndexEntry {
-    let zero = git2::IndexTime::new(0, 0);
-    git2::IndexEntry {
-        ctime: zero,
-        mtime: zero,
-        dev: 0,
-        ino: 0,
-        mode,
-        uid: 0,
-        gid: 0,
-        file_size: size.min(u32::MAX as u64) as u32,
-        id,
-        flags: path.len().min(0xfff) as u16,
-        flags_extended: 0,
-        path: path.as_bytes().to_vec(),
+fn private_rules(workspace: &Path, private_dirs: &[PathBuf]) -> String {
+    let mut rules = String::new();
+    for dir in private_dirs {
+        let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+        if let Ok(relative) = dir.strip_prefix(workspace) {
+            if !relative.as_os_str().is_empty() {
+                rules.push_str(&anchored(relative));
+            }
+        }
     }
+    rules
 }
 /// An exclude rule that matches exactly one workspace-relative directory.
 fn anchored(relative: &Path) -> String {
@@ -569,39 +337,6 @@ pub fn link_escapes(link_path: &str, target: &[u8]) -> bool {
     false
 }
 
-struct Change {
-    path: String,
-    id: Oid,
-    mode: u32,
-    size: u64,
-}
-impl Change {
-    fn entry(&self) -> git2::IndexEntry {
-        index_entry(&self.path, self.id, self.mode, self.size)
-    }
-}
-struct Packing<'a> {
-    budget: u64,
-    message: &'a str,
-    hide: Vec<Oid>,
-}
-fn batches(changes: Vec<Change>, limit: u64) -> Vec<Vec<Change>> {
-    let mut batches = Vec::new();
-    let mut batch = Vec::new();
-    let mut used = 0;
-    for change in changes {
-        if !batch.is_empty() && used + change.size > limit {
-            batches.push(std::mem::take(&mut batch));
-            used = 0;
-        }
-        used += change.size;
-        batch.push(change);
-    }
-    if !batch.is_empty() {
-        batches.push(batch);
-    }
-    batches
-}
 fn nested_repository(workspace: &Path, path: &Path) -> Option<String> {
     let mut candidate = workspace.join(path);
     while candidate != workspace {

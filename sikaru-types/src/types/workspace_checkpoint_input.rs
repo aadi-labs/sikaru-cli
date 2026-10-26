@@ -5,7 +5,7 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct WorkspaceCheckpointInput {
     #[serde(default)]
-    pub commit_sha: String,
+    pub manifest_digest: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
     pub trigger: WorkspaceCheckpointInputTrigger,
@@ -20,14 +20,14 @@ impl WorkspaceCheckpointInput {
 #[derive(Clone, PartialEq, Default, Debug)]
 #[non_exhaustive]
 pub struct WorkspaceCheckpointInputBuilder {
-    commit_sha: Option<String>,
+    manifest_digest: Option<String>,
     run_id: Option<String>,
     trigger: Option<WorkspaceCheckpointInputTrigger>,
 }
 
 impl WorkspaceCheckpointInputBuilder {
-    pub fn commit_sha(mut self, value: impl Into<String>) -> Self {
-        self.commit_sha = Some(value.into());
+    pub fn manifest_digest(mut self, value: impl Into<String>) -> Self {
+        self.manifest_digest = Some(value.into());
         self
     }
 
@@ -43,11 +43,11 @@ impl WorkspaceCheckpointInputBuilder {
 
     /// Consumes the builder and constructs a [`WorkspaceCheckpointInput`].
     /// This method will fail if any of the following fields are not set:
-    /// - [`commit_sha`](WorkspaceCheckpointInputBuilder::commit_sha)
+    /// - [`manifest_digest`](WorkspaceCheckpointInputBuilder::manifest_digest)
     /// - [`trigger`](WorkspaceCheckpointInputBuilder::trigger)
     pub fn build(self) -> Result<WorkspaceCheckpointInput, BuildError> {
         Ok(WorkspaceCheckpointInput {
-            commit_sha: self.commit_sha.ok_or_else(|| BuildError::missing_field("commit_sha"))?,
+            manifest_digest: self.manifest_digest.ok_or_else(|| BuildError::missing_field("manifest_digest"))?,
             run_id: self.run_id,
             trigger: self.trigger.ok_or_else(|| BuildError::missing_field("trigger"))?,
         })

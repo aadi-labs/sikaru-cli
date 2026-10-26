@@ -12,7 +12,7 @@ pub struct RunEvent {
     pub event_type: String,
     #[serde(default)]
     pub id: String,
-    /// Fields specific to `eventType`; open by design. Documented shapes: `run.failed` carries `error`, a RunError (`code`, `message`, `recoverable`). `run.tool_call.failed` may carry `error` with `code` and `message`, where `code` is one of `effect_unconfirmed`, `approval_denied`, `access_changed`; the action did not run, or its outcome could not be confirmed and it was not repeated. `run.paused` carries `reason`: `credits_required` (credits or the agent spending cap ran out; the run resumes once funded) or `admission_deferred` (the run is waiting to be admitted and resumes on its own).
+    /// Fields specific to `eventType`; open by design. Documented shapes: `run.failed` carries `error`, a RunError (`code`, `message`, `recoverable`). `run.tool_call.failed` may carry `error` with `code` and `message`, where `code` is one of `connection_revoked`, `reconnect_required`, `effect_unconfirmed`, `approval_denied`, `access_changed`; the action did not run, or its outcome could not be confirmed and it was not repeated. `run.paused` carries `reason`: `credits_exhausted`, `spend_limit_reached`, `billing_unavailable`, `plan_inactive`, `trial_ended`, or `admission_deferred`. `admission_deferred` retries automatically when execution can be admitted. The funding reason identifies whether to add credits, review a limit or subscription, or retry temporary spending confirmation.
     #[serde(default)]
     pub payload: HashMap<String, serde_json::Value>,
     #[serde(default)]

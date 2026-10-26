@@ -29,7 +29,7 @@ def steps():
     ready = dict(executor_instance_id='instance', journal_id='journal',
         workspace_provenance=PROVENANCE, protocol_version='sikaru-compute-v1',
         capabilities=['compute.execute'])
-    active = dict(ATTACHMENT, owner_id='worker', owner_epoch=1, lease_until=2000000000.0)
+    active = dict(ATTACHMENT, owner_id='controller:claim', owner_epoch=1, lease_until=2000000000.0)
     recovery = dict(active, status='recovery_required', processes=[
         {'handle_id': 'handle', 'status': 'lost', 'evidence': 'ownership unproven'}])
     work = dict(attachment=dict(active, status='ready'), execution_phase='running',
@@ -42,8 +42,11 @@ def steps():
         ('POST', BASE+'execution-sessions/session/compute-attachments', 'controller',
          dict(environment_id='environment', workspace_provenance=PROVENANCE, idempotency_key='create'), 201, ATTACHMENT),
         ('GET', PATH, 'controller', None, 200, ATTACHMENT),
-        ('GET', BASE+'compute-environments/environment/queue', 'sk_compute_worker', None, 200,
-         dict(attachments=[ATTACHMENT], poll_after_seconds=1)),
+        ('POST', PATH+'/claim', 'controller', dict(idempotency_key='claim'), 200,
+         dict(id='claim', attachment_id='attachment', owner_id='controller:claim', owner_epoch=1,
+              status='starting', lease_until=2000000000.0)),
+        ('POST', PATH+'/credentials', 'controller', dict(owner_id='controller:claim', owner_epoch=1), 201,
+         dict(credential_id='credential', token='sk_compute_executor', expires_at=2000000000.0)),
         ('POST', PATH+'/ready', 'sk_compute_executor', ready, 200, dict(active,status='ready')),
         ('GET', PATH+'/work', 'sk_compute_executor', None, 200, work),
         ('POST', PATH+'/receipts', 'sk_compute_executor', RECEIPT, 200,
@@ -56,8 +59,8 @@ def steps():
         ('GET', PATH+'/status', 'sk_compute_executor', None, 200, recovery),
         ('GET', PATH+'/work', 'sk_compute_executor', None, 200,
          dict(work, execution_phase='terminal', operations=[], execution=dict(run_id='run',status='completed',approval_required=False,terminal=True))),
-        ('GET', PATH+'/work', 'wrong-scope', None, 403, {'detail':'Outside attachment authority'}),
-        ('POST', PATH+'/receipts', 'sk_compute_executor', RECEIPT, 503, {'detail':'Response lost after commit'}),
+        ('GET', PATH+'/work', 'wrong-scope', None, 403, {'detail':'Outside attachment authority','code':'forbidden'}),
+        ('POST', PATH+'/receipts', 'sk_compute_executor', RECEIPT, 503, {'detail':'Response lost after commit','code':'service_unavailable'}),
     ]
 
 
@@ -107,7 +110,7 @@ def run(command):
         server.shutdown()
         server.server_close()
         thread.join()
-    print('PASS: 12 scoped lifecycle requests, typed recovery/terminal polling, immutable replay, no automatic mutation retry')
+    print('PASS: 13 scoped lifecycle requests, typed recovery/terminal polling, immutable replay, no automatic mutation retry')
 
 
 if __name__ == '__main__':

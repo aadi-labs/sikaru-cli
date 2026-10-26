@@ -10,6 +10,8 @@ pub struct TranscriptStep {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<HashMap<String, i64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
     #[serde(default)]
     pub results: Vec<TranscriptToolResult>,
     pub source: TranscriptStepSource,
@@ -31,6 +33,7 @@ pub struct TranscriptStepBuilder {
     llm_call_count: Option<i64>,
     message: Option<String>,
     metrics: Option<HashMap<String, i64>>,
+    reasoning_content: Option<String>,
     results: Option<Vec<TranscriptToolResult>>,
     source: Option<TranscriptStepSource>,
     step_id: Option<i64>,
@@ -50,6 +53,11 @@ impl TranscriptStepBuilder {
 
     pub fn metrics(mut self, value: HashMap<String, i64>) -> Self {
         self.metrics = Some(value);
+        self
+    }
+
+    pub fn reasoning_content(mut self, value: impl Into<String>) -> Self {
+        self.reasoning_content = Some(value.into());
         self
     }
 
@@ -85,6 +93,7 @@ impl TranscriptStepBuilder {
             llm_call_count: self.llm_call_count,
             message: self.message.ok_or_else(|| BuildError::missing_field("message"))?,
             metrics: self.metrics,
+            reasoning_content: self.reasoning_content,
             results: self.results.ok_or_else(|| BuildError::missing_field("results"))?,
             source: self.source.ok_or_else(|| BuildError::missing_field("source"))?,
             step_id: self.step_id.ok_or_else(|| BuildError::missing_field("step_id"))?,

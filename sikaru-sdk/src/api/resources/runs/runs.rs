@@ -155,6 +155,124 @@ impl RunsClient {
             .await
     }
 
+    /// Recheck up to 100 authorized needs-action runs and jobs; only cleared stops resume.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .runs
+    ///         .resume_all(
+    ///             &"project_id".to_string(),
+    ///             &ResumeFilter {
+    ///                 ..Default::default()
+    ///             },
+    ///             None,
+    ///         )
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn resume_all(
+        &self,
+        project_id: &str,
+        request: &ResumeFilter,
+        options: Option<RequestOptions>,
+    ) -> Result<ResumeResults, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::POST,
+                &format!("v1/projects/{}/runs/resume", project_id),
+                Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// Count needs-action work the caller can control, grouped by funding reason.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .runs
+    ///         .resume_count(&"project_id".to_string(), None)
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn resume_count(
+        &self,
+        project_id: &str,
+        options: Option<RequestOptions>,
+    ) -> Result<ResumeCounts, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::GET,
+                &format!("v1/projects/{}/runs/resume/count", project_id),
+                None,
+                None,
+                options,
+            )
+            .await
+    }
+
     /// # Examples
     ///
     /// ```no_run
@@ -470,6 +588,63 @@ impl RunsClient {
                 Method::POST,
                 &format!("v1/projects/{}/runs/{}/recover", project_id, run_id),
                 Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// Resume the same retained turn. A refused request does not change its state.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .runs
+    ///         .resume(&"project_id".to_string(), &"run_id".to_string(), None)
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn resume(
+        &self,
+        project_id: &str,
+        run_id: &str,
+        options: Option<RequestOptions>,
+    ) -> Result<ResumeResult, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::POST,
+                &format!("v1/projects/{}/runs/{}/resume", project_id, run_id),
+                None,
                 None,
                 options,
             )

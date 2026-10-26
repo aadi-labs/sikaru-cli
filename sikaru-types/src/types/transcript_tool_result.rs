@@ -8,6 +8,8 @@ pub struct TranscriptToolResult {
     pub content: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<TranscriptHostToolCall>>,
 }
 
 impl TranscriptToolResult {
@@ -21,6 +23,7 @@ impl TranscriptToolResult {
 pub struct TranscriptToolResultBuilder {
     content: Option<serde_json::Value>,
     source_call_id: Option<String>,
+    tool_calls: Option<Vec<TranscriptHostToolCall>>,
 }
 
 impl TranscriptToolResultBuilder {
@@ -34,11 +37,17 @@ impl TranscriptToolResultBuilder {
         self
     }
 
+    pub fn tool_calls(mut self, value: Vec<TranscriptHostToolCall>) -> Self {
+        self.tool_calls = Some(value);
+        self
+    }
+
     /// Consumes the builder and constructs a [`TranscriptToolResult`].
     pub fn build(self) -> Result<TranscriptToolResult, BuildError> {
         Ok(TranscriptToolResult {
             content: self.content,
             source_call_id: self.source_call_id,
+            tool_calls: self.tool_calls,
         })
     }
 }

@@ -8,18 +8,21 @@ pub enum ApiError {
         message: String,
         code: Option<String>,
         detail: Option<String>,
+        reason: Option<String>,
     },
     #[error("ForbiddenError: Access forbidden - {message}")]
     ForbiddenError {
         message: String,
         code: Option<String>,
         detail: Option<String>,
+        reason: Option<String>,
     },
     #[error("NotFoundError: Resource not found - {message}")]
     NotFoundError {
         message: String,
         code: Option<String>,
         detail: Option<String>,
+        reason: Option<String>,
     },
     #[error("UnprocessableEntityError: Unprocessable entity - {message}")]
     UnprocessableEntityError {
@@ -31,24 +34,28 @@ pub enum ApiError {
         message: String,
         code: Option<String>,
         detail: Option<String>,
+        reason: Option<String>,
     },
     #[error("ServiceUnavailableError: {message}")]
     ServiceUnavailableError {
         message: String,
         code: Option<String>,
         detail: Option<String>,
+        reason: Option<String>,
     },
     #[error("PaymentRequiredError: {message}")]
     PaymentRequiredError {
         message: String,
         code: Option<String>,
         detail: Option<String>,
+        reason: Option<String>,
     },
     #[error("TooManyRequestsError: Rate limit exceeded - {message}")]
     TooManyRequestsError {
         message: String,
         code: Option<String>,
         detail: Option<String>,
+        reason: Option<String>,
     },
     #[error("HTTP error {status}: {message}")]
     Http { status: u16, message: String },
@@ -91,6 +98,9 @@ impl ApiError {
                             detail: parsed
                                 .get("detail")
                                 .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            reason: parsed
+                                .get("reason")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
                         };
                     }
                 }
@@ -98,6 +108,7 @@ impl ApiError {
                     message: body.unwrap_or("Unknown error").to_string(),
                     code: None,
                     detail: None,
+                    reason: None,
                 };
             }
             403 => {
@@ -116,6 +127,9 @@ impl ApiError {
                             detail: parsed
                                 .get("detail")
                                 .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            reason: parsed
+                                .get("reason")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
                         };
                     }
                 }
@@ -123,6 +137,7 @@ impl ApiError {
                     message: body.unwrap_or("Unknown error").to_string(),
                     code: None,
                     detail: None,
+                    reason: None,
                 };
             }
             404 => {
@@ -141,6 +156,9 @@ impl ApiError {
                             detail: parsed
                                 .get("detail")
                                 .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            reason: parsed
+                                .get("reason")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
                         };
                     }
                 }
@@ -148,6 +166,7 @@ impl ApiError {
                     message: body.unwrap_or("Unknown error").to_string(),
                     code: None,
                     detail: None,
+                    reason: None,
                 };
             }
             422 => {
@@ -187,6 +206,9 @@ impl ApiError {
                             detail: parsed
                                 .get("detail")
                                 .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            reason: parsed
+                                .get("reason")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
                         };
                     }
                 }
@@ -194,6 +216,7 @@ impl ApiError {
                     message: body.unwrap_or("Unknown error").to_string(),
                     code: None,
                     detail: None,
+                    reason: None,
                 };
             }
             503 => {
@@ -212,6 +235,9 @@ impl ApiError {
                             detail: parsed
                                 .get("detail")
                                 .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            reason: parsed
+                                .get("reason")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
                         };
                     }
                 }
@@ -219,6 +245,7 @@ impl ApiError {
                     message: body.unwrap_or("Unknown error").to_string(),
                     code: None,
                     detail: None,
+                    reason: None,
                 };
             }
             402 => {
@@ -237,6 +264,9 @@ impl ApiError {
                             detail: parsed
                                 .get("detail")
                                 .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            reason: parsed
+                                .get("reason")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
                         };
                     }
                 }
@@ -244,6 +274,7 @@ impl ApiError {
                     message: body.unwrap_or("Unknown error").to_string(),
                     code: None,
                     detail: None,
+                    reason: None,
                 };
             }
             429 => {
@@ -262,6 +293,9 @@ impl ApiError {
                             detail: parsed
                                 .get("detail")
                                 .and_then(|v| v.as_str().map(|s| s.to_string())),
+                            reason: parsed
+                                .get("reason")
+                                .and_then(|v| v.as_str().map(|s| s.to_string())),
                         };
                     }
                 }
@@ -269,6 +303,7 @@ impl ApiError {
                     message: body.unwrap_or("Unknown error").to_string(),
                     code: None,
                     detail: None,
+                    reason: None,
                 };
             }
             _ => Self::Http {

@@ -32,7 +32,7 @@ mod workflow {
     use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
     #[derive(Default)]
     struct Server {
-        remote_mints: usize,
+        policy_reads: usize,
         records: Vec<Value>,
         order: Vec<&'static str>,
         sessions: usize,
@@ -51,7 +51,7 @@ mod workflow {
     struct Oracle {
         state: Arc<Mutex<Server>>,
         scenario: &'static str,
-        git: Option<Arc<git_remote::GitRemote>>,
+        git: Option<Arc<git_remote::WorkspaceUploads>>,
     }
     fn ok(v: Value) -> ResponseTemplate {
         ResponseTemplate::new(200).set_body_json(v)
@@ -62,6 +62,9 @@ mod workflow {
             let path = r.url.path();
             if let Some(response) = self.fault(path) {
                 return response;
+            }
+            if path.ends_with("/workspace-content") {
+                return self.git.as_ref().unwrap().upload(&r.body);
             }
             let mut s = self.state.lock().unwrap();
             if let Some(response) = self.workspace(&mut s, path, &body) {
@@ -96,11 +99,13 @@ mod workflow {
                 if self.scenario == "completedresume" {
                     s.receipts = 0;
                 }
-                return ok(json!({"input":{"id":"input","idempotencyKey":body["idempotency_key"],
+                return ok(
+                    json!({"input":{"id":"input","idempotencyKey":body["idempotency_key"],
                     "mode":"immediate","status":"accepted","runId":self.run_id(&s)},
                     "run":{"id":self.run_id(&s),"inputId":"input",
                         "sessionId":format!("session-{}",s.sessions),"status":"queued",
-                        "harnessVersionId":"version","traceId":null}}));
+                        "harnessVersionId":"version","traceId":null}}),
+                );
             }
             if path.ends_with("/events") {
                 return ok(
@@ -124,22 +129,24 @@ mod workflow {
             ok(result)
         }
         fn workspace(&self, s: &mut Server, path: &str, body: &Value) -> Option<ResponseTemplate> {
-            if path.ends_with("/workspace-remote") {
-                let Some(git) = &self.git else {
+            if path.ends_with("/workspace-policy") {
+                if self.git.is_none() {
                     return Some(ResponseTemplate::new(404));
-                };
-                s.remote_mints += 1;
+                }
+                s.policy_reads += 1;
                 return Some(ok(
-                    json!({"remote_url":git.url(),"username":"x-token","token":format!("token-{}",s.remote_mints),
-                    "branch":git_remote::BRANCH,"head_sha":git.head(),"ignore_defaults":git_remote::IGNORE_DEFAULTS,
-                    "expires_at":git_remote::rfc3339(git_remote::unix_now()+900),"max_push_bytes":100_000_000}),
+                    json!({"ignore":git_remote::IGNORE_DEFAULTS,"credentials":[".env", "*.pem"]}),
                 ));
             }
             if path.ends_with("/workspace-checkpoints") {
+                self.git
+                    .as_ref()
+                    .unwrap()
+                    .record(body["manifest_digest"].as_str().unwrap());
                 s.records.push(body.clone());
                 s.order.push("record");
                 return Some(ok(
-                    json!({"commit_sha":body["commit_sha"],"branch":git_remote::BRANCH,"recorded_at":"2026-09-29T00:00:00Z"}),
+                    json!({"commit_sha":body["manifest_digest"],"branch":git_remote::BRANCH,"recorded_at":"2026-09-29T00:00:00Z"}),
                 ));
             }
 
@@ -330,11 +337,11 @@ mod workflow {
         MockServer,
         Arc<Mutex<Server>>,
         tempfile::TempDir,
-        Arc<git_remote::GitRemote>,
+        Arc<git_remote::WorkspaceUploads>,
     ) {
         let server = MockServer::start().await;
         let state = Arc::new(Mutex::new(Server::default()));
-        let git = Arc::new(git_remote::GitRemote::start(git_remote::Faults::default()).await);
+        let git = Arc::new(git_remote::WorkspaceUploads::new(None, false));
         Mock::given(wiremock::matchers::any())
             .respond_with(Oracle {
                 state: state.clone(),
@@ -416,8 +423,8 @@ mod workflow {
             )
         )));
         let s = state.lock().unwrap();
-        assert_eq!((s.remote_mints, s.records.len()), (0, 0));
-        assert!(git.head().is_none() && git.seen.lock().unwrap().pushes_started == 0);
+        assert_eq!((s.policy_reads, s.records.len()), (0, 0));
+        assert!(git.head().is_none() && git.seen.lock().unwrap().uploads_started == 0);
         let mut stack = vec![workspace.clone()];
         while let Some(dir) = stack.pop() {
             for entry in std::fs::read_dir(dir).unwrap().flatten() {

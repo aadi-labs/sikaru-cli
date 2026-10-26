@@ -326,8 +326,6 @@ async fn parked_handle_returns_terminal_state_without_restarting() {
 mod checkpoint;
 #[path = "../cli/sikaru/compute_checkpoint_repo.rs"]
 mod checkpoint_repo;
-#[path = "../cli/sikaru/compute_git_http.rs"]
-mod git_http;
 #[path = "../cli/sikaru/compute_runtime.rs"]
 mod runtime;
 #[path = "../cli/sikaru/compute_transport.rs"]

@@ -1,6 +1,6 @@
 //! Executor lifecycle: local authority and durable effects precede network receipts.
 use super::{
-    checkpoint::{self, Plan, RemoteSlot, RepoPaths, Trigger},
+    checkpoint::{self, Plan, RepoPaths, Trigger},
     config::Bootstrap,
     journal::{Binding, Journal},
     process::Processes,
@@ -27,7 +27,7 @@ pub struct RunOptions {
     pub timeout: Option<Duration>,
     pub stop: Option<watch::Receiver<bool>>,
     pub admission: Option<watch::Receiver<bool>>,
-    /// Hidden `--no-workspace-checkpoints`: no private repository, remote or push.
+    /// Hidden `--no-workspace-checkpoints`: no private staging or content uploads.
     pub skip_checkpoints: bool,
     /// Controller state inside the workspace that checkpoints leave out.
     pub private_dirs: Vec<PathBuf>,
@@ -189,15 +189,6 @@ async fn run(
     let (lease, receiver) = watch::channel(deadline);
     let heartbeat = maintain_lease(transport.clone(), lease);
     tokio::pin!(heartbeat);
-    let slot = RemoteSlot::default();
-    let checkpoints = repository.is_some();
-    let keeper = async {
-        if checkpoints {
-            checkpoint::keep_remote(&transport, &slot, receiver.clone()).await;
-        }
-        std::future::pending::<()>().await
-    };
-    tokio::pin!(keeper);
     let completed = Mutex::new(None::<String>);
     let admission = options.admission.take();
     let approval_wait = options.approval_wait;
@@ -212,7 +203,6 @@ async fn run(
             lease_held = false;
             match result { Err(error) => Err(error), Ok(()) => Err(anyhow::anyhow!("lease_expired")) }
         },
-        _=&mut keeper=>unreachable!("the remote keeper never returns"),
         result=async {await_admission(admission).await?;work_loop(&transport,journal,processes,receiver.clone(),approval_wait,&completed).await}=>result,
     };
     // Owned processes stop before the workspace is captured.
@@ -242,7 +232,7 @@ async fn run(
             let deadline = *receiver.borrow();
             let _ = reconcile(&transport, journal, processes, deadline).await;
         }
-        checkpoint::checkpoint(&transport, &plan, &slot, async |deadline| {
+        checkpoint::checkpoint(&transport, &plan, async |deadline| {
             if !local_clean {
                 bail!("cleanup_unconfirmed");
             }

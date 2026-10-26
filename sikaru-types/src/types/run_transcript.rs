@@ -9,6 +9,8 @@ pub struct RunTranscript {
     #[serde(default)]
     pub events: Vec<TranscriptEvent>,
     pub evidence: RunTranscriptEvidence,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<Vec<TranscriptProgressEvent>>,
     pub run: TranscriptRun,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trajectory: Option<TranscriptTrajectory>,
@@ -28,6 +30,7 @@ pub struct RunTranscriptBuilder {
     connections: Option<Vec<PersonalConnectionPrompt>>,
     events: Option<Vec<TranscriptEvent>>,
     evidence: Option<RunTranscriptEvidence>,
+    progress: Option<Vec<TranscriptProgressEvent>>,
     run: Option<TranscriptRun>,
     trajectory: Option<TranscriptTrajectory>,
     usage: Option<TranscriptUsage>,
@@ -46,6 +49,11 @@ impl RunTranscriptBuilder {
 
     pub fn evidence(mut self, value: RunTranscriptEvidence) -> Self {
         self.evidence = Some(value);
+        self
+    }
+
+    pub fn progress(mut self, value: Vec<TranscriptProgressEvent>) -> Self {
+        self.progress = Some(value);
         self
     }
 
@@ -74,6 +82,7 @@ impl RunTranscriptBuilder {
             connections: self.connections,
             events: self.events.ok_or_else(|| BuildError::missing_field("events"))?,
             evidence: self.evidence.ok_or_else(|| BuildError::missing_field("evidence"))?,
+            progress: self.progress,
             run: self.run.ok_or_else(|| BuildError::missing_field("run"))?,
             trajectory: self.trajectory,
             usage: self.usage,

@@ -33,6 +33,11 @@ pub struct ManagedRun {
     #[serde(rename = "latencyMs")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<f64>,
+    #[serde(rename = "measurementStatus")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measurement_status: Option<ManagedRunMeasurementStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pause: Option<ManagedRunPause>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub personal: Option<bool>,
     #[serde(rename = "runId")]
@@ -64,6 +69,8 @@ pub struct ManagedRunBuilder {
     harness_id: Option<String>,
     harness_version_id: Option<String>,
     latency_ms: Option<f64>,
+    measurement_status: Option<ManagedRunMeasurementStatus>,
+    pause: Option<ManagedRunPause>,
     personal: Option<bool>,
     run_id: Option<String>,
     status: Option<String>,
@@ -121,6 +128,16 @@ impl ManagedRunBuilder {
         self
     }
 
+    pub fn measurement_status(mut self, value: ManagedRunMeasurementStatus) -> Self {
+        self.measurement_status = Some(value);
+        self
+    }
+
+    pub fn pause(mut self, value: ManagedRunPause) -> Self {
+        self.pause = Some(value);
+        self
+    }
+
     pub fn personal(mut self, value: bool) -> Self {
         self.personal = Some(value);
         self
@@ -160,6 +177,8 @@ impl ManagedRunBuilder {
             harness_id: self.harness_id.ok_or_else(|| BuildError::missing_field("harness_id"))?,
             harness_version_id: self.harness_version_id.ok_or_else(|| BuildError::missing_field("harness_version_id"))?,
             latency_ms: self.latency_ms,
+            measurement_status: self.measurement_status,
+            pause: self.pause,
             personal: self.personal,
             run_id: self.run_id.ok_or_else(|| BuildError::missing_field("run_id"))?,
             status: self.status.ok_or_else(|| BuildError::missing_field("status"))?,

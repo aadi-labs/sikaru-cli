@@ -1,5 +1,5 @@
 use crate::api::*;
-use crate::{ApiError, ClientConfig, HttpClient, RequestOptions};
+use crate::{ApiError, ClientConfig, HttpClient, QueryBuilder, RequestOptions};
 use reqwest::Method;
 
 pub struct ComputeWorkspacesClient {
@@ -13,7 +13,7 @@ impl ComputeWorkspacesClient {
         })
     }
 
-    /// Record a pushed commit as this session's workspace checkpoint. Idempotent on ``commit_sha``.
+    /// Record a verified uploaded manifest as this session's workspace checkpoint.
     ///
     /// # Arguments
     ///
@@ -41,7 +41,7 @@ impl ComputeWorkspacesClient {
     ///             &"project_id".to_string(),
     ///             &"attachment_id".to_string(),
     ///             &WorkspaceCheckpointInput {
-    ///                 commit_sha: "commit_sha".to_string(),
+    ///                 manifest_digest: "manifest_digest".to_string(),
     ///                 trigger: WorkspaceCheckpointInputTrigger::Turn,
     ///                 run_id: None,
     ///             },
@@ -83,7 +83,49 @@ impl ComputeWorkspacesClient {
             .await
     }
 
-    /// Scoped git remote for this session's workspace branch. Request it again before ``expires_at``.
+    /// Upload file or manifest bytes before acknowledging a workspace checkpoint.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    pub async fn upload(
+        &self,
+        project_id: &str,
+        attachment_id: &str,
+        request: &Vec<u8>,
+        options: Option<RequestOptions>,
+    ) -> Result<WorkspaceContentView, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            o.max_retries = Some(0);
+            Some(o)
+        };
+        self.http_client
+            .execute_bytes_request(
+                Method::PUT,
+                &format!(
+                    "v1/projects/{}/compute-attachments/{}/workspace-content",
+                    project_id, attachment_id
+                ),
+                Some(request.to_vec()),
+                None,
+                options,
+            )
+            .await
+    }
+
+    /// Read the pinned publication rules before capturing workspace files.
     ///
     /// # Arguments
     ///
@@ -107,10 +149,10 @@ impl ComputeWorkspacesClient {
     ///     let client = SikaruClient::new(config).expect("Failed to build client");
     ///     client
     ///         .compute_workspaces
-    ///         .remote(
+    ///         .policy(
     ///             &"project_id".to_string(),
     ///             &"attachment_id".to_string(),
-    ///             &WorkspaceRemoteInput {
+    ///             &PolicyQueryRequest {
     ///                 ..Default::default()
     ///             },
     ///             None,
@@ -118,13 +160,13 @@ impl ComputeWorkspacesClient {
     ///         .await;
     /// }
     /// ```
-    pub async fn remote(
+    pub async fn policy(
         &self,
         project_id: &str,
         attachment_id: &str,
-        request: &WorkspaceRemoteInput,
+        request: &PolicyQueryRequest,
         options: Option<RequestOptions>,
-    ) -> Result<WorkspaceRemoteView, ApiError> {
+    ) -> Result<WorkspacePolicyView, ApiError> {
         let endpoint_auth_headers = self
             .http_client
             .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
@@ -134,18 +176,19 @@ impl ComputeWorkspacesClient {
             for (header_key, header_value) in endpoint_auth_headers {
                 o.additional_headers.insert(header_key, header_value);
             }
-            o.max_retries = Some(0);
             Some(o)
         };
         self.http_client
             .execute_request(
-                Method::POST,
+                Method::GET,
                 &format!(
-                    "v1/projects/{}/compute-attachments/{}/workspace-remote",
+                    "v1/projects/{}/compute-attachments/{}/workspace-policy",
                     project_id, attachment_id
                 ),
-                Some(serde_json::to_value(request).map_err(ApiError::Serialization)?),
                 None,
+                QueryBuilder::new()
+                    .serialize("run_id", request.run_id.clone())
+                    .build(),
                 options,
             )
             .await

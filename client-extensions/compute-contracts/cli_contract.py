@@ -5,7 +5,7 @@ import subprocess
 
 
 def call(token, group, operation, *, fail=False, **parameters):
-    args = [os.environ['COMPUTE_CONTRACT_BINARY'], group.replace('_','-'), operation, '--project-id', 'project',
+    args = [os.environ['COMPUTE_CONTRACT_BINARY'], 'agent', group.replace('_','-'), operation, '--project-id', 'project',
             '--base-url', os.environ['CONTRACT_URL'], '--format', 'json']
     for name, value in parameters.items():
         args.extend(['--'+name.replace('_','-'), json.dumps(value) if isinstance(value, (dict,list)) else str(value)])
@@ -23,8 +23,10 @@ def create_and_ready():
     assert a['owner_id'] is None
     assert a['workspace_generation']=='generation' and a['status']=='pending'
     assert call('controller','compute_attachments','get',attachment_id='attachment')['journal_id']=='journal'
-    queue = call('sk_compute_worker','compute_workers','poll',environment_id='environment',wait_seconds=0)
-    assert queue['attachments'][0]['id']=='attachment'
+    claim = call('controller','compute_attachments','claim',attachment_id='attachment',idempotency_key='claim')
+    assert claim['owner_epoch']==1
+    credential = call('controller','compute_attachments','issue_credential',attachment_id='attachment',owner_id=claim['owner_id'],owner_epoch=claim['owner_epoch'])
+    assert credential['token']=='sk_compute_executor'
     ready = call('sk_compute_executor','compute_attachments','ready', attachment_id='attachment', executor_instance_id='instance',journal_id='journal',workspace_provenance=provenance,protocol_version='sikaru-compute-v1',capabilities=['compute.execute'])
     assert ready['status']=='ready'
 

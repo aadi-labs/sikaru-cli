@@ -32,8 +32,6 @@ impl HttpIdentity {
 pub struct Transport {
     pub client: ApiClient,
     pub binding: Binding,
-    /// The same client the generated API uses; checkpoint pushes reuse its TLS and headers.
-    pub http: reqwest::Client,
     channel_url: Result<String, String>,
     token: String,
     user_agent: String,
@@ -55,7 +53,6 @@ impl Transport {
         Ok(Arc::new(Self {
             client,
             binding,
-            http: http.client,
             channel_url,
             token: b.token.clone(),
             user_agent: http.user_agent,
@@ -127,21 +124,41 @@ impl Transport {
             ],
         }
     }
-    /// Mint the session's scoped git remote. The service mints only while the lease is valid.
-    pub async fn workspace_remote(&self, deadline: Instant) -> Result<WorkspaceRemoteView> {
+    pub async fn workspace_policy(
+        &self,
+        run_id: Option<String>,
+        deadline: Instant,
+    ) -> Result<WorkspacePolicyView> {
         bounded(
             deadline,
-            self.client.compute_workspaces.remote(
+            self.client.compute_workspaces.policy(
                 &self.binding.project_id,
                 &self.binding.attachment_id,
-                &WorkspaceRemoteInput {},
+                &PolicyQueryRequest { run_id },
                 None,
             ),
         )
         .await
     }
-    /// Record a pushed head. The service answers after it has published the run's outputs,
-    /// so this call gets the checkpoint's own deadline instead of the 5 s call bound.
+    pub async fn upload_workspace_content(
+        &self,
+        bytes: Vec<u8>,
+        deadline: Instant,
+    ) -> Result<WorkspaceContentView> {
+        tokio::time::timeout_at(
+            deadline,
+            self.client.compute_workspaces.upload(
+                &self.binding.project_id,
+                &self.binding.attachment_id,
+                &bytes,
+                None,
+            ),
+        )
+        .await
+        .map_err(|_| anyhow::Error::new(TransportFailure::Transient))?
+        .map_err(classify)
+    }
+    /// Record only after every referenced content object has been uploaded.
     pub async fn record_checkpoint(
         &self,
         body: &WorkspaceCheckpointInput,
@@ -289,8 +306,6 @@ pub enum TransportFailure {
 /// Record refusals the service names. The error is matched, never formatted into output.
 #[derive(Debug, thiserror::Error)]
 pub enum RecordRefusal {
-    #[error("commit_not_on_branch")]
-    NotOnBranch,
     #[error("turn_already_checkpointed")]
     AlreadyCheckpointed,
     #[error("workspace_not_quiescent")]
@@ -298,9 +313,6 @@ pub enum RecordRefusal {
 }
 fn record_error(error: ApiError) -> anyhow::Error {
     let described = format!("{error:?}");
-    if described.contains("commit_not_on_branch") {
-        return anyhow::Error::new(RecordRefusal::NotOnBranch);
-    }
     if described.contains("turn_already_checkpointed") {
         return anyhow::Error::new(RecordRefusal::AlreadyCheckpointed);
     }
@@ -1070,5 +1082,13 @@ mod channel_tests {
                 assert!(values.contains(value), "{name}.{key}={value}");
             }
         }
+    }
+
+    /// A gateway restart (1012) during a rolling deploy reconnects; a fence never does.
+    #[test]
+    fn gateway_restart_reconnects_and_fencing_stops() {
+        assert_eq!(close_code(1012), ChannelEnd::Lost);
+        assert_eq!(close_code(1001), ChannelEnd::Lost);
+        assert_eq!(close_code(4409), ChannelEnd::Fenced);
     }
 }

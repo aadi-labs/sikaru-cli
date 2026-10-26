@@ -234,6 +234,3 @@ pub mod checkpoint;
 #[cfg(unix)]
 #[path = "compute_checkpoint_repo.rs"]
 pub mod checkpoint_repo;
-#[cfg(unix)]
-#[path = "compute_git_http.rs"]
-pub mod git_http;

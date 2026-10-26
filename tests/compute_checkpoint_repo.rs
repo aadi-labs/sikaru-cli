@@ -6,7 +6,7 @@ mod checkpoint_repo;
 #[path = "support/git_remote.rs"]
 mod git_remote;
 use checkpoint_repo::{link_escapes, PrivateRepo, SkipReason, EXECUTABLE, LINK};
-use git_remote::{git, ignore_defaults, noise, porcelain, snapshot, task_repository, text};
+use git_remote::{git, ignore_defaults, porcelain, snapshot, task_repository};
 use std::{collections::BTreeMap, path::PathBuf};
 
 struct Fixture {
@@ -29,7 +29,8 @@ fn open(f: &Fixture, private: &[PathBuf]) -> PrivateRepo {
     let repo = PrivateRepo::open_or_init(&f.state.join("workspace.git"), &f.ws).unwrap();
     let mut dirs = vec![f.state.clone()];
     dirs.extend_from_slice(private);
-    repo.write_exclude(&ignore_defaults(), &dirs).unwrap();
+    repo.write_exclude(&ignore_defaults(), &dirs, &[".env".into(), "*.pem".into()])
+        .unwrap();
     repo
 }
 /// path -> (mode, content) of a tree in the private repository.
@@ -58,10 +59,7 @@ fn task_repository_git_dir_and_status_are_never_modified() {
     let before = (snapshot(&f.ws), porcelain(&f.ws));
     let repo = open(&f, &[]);
     let staged = repo.stage().unwrap();
-    let chain = repo
-        .chain(None, staged.tree, 50_000_000, "checkpoint")
-        .unwrap();
-    repo.pack(chain.commits[0], &[]).unwrap();
+    repo.snapshot().unwrap();
     assert_eq!(
         (snapshot(&f.ws), porcelain(&f.ws)),
         before,
@@ -110,81 +108,6 @@ fn ignore_rules_apply_and_tracked_ignored_paths_are_dropped() {
     assert!(
         !tree.contains_key(".env.example"),
         "credential templates are never published"
-    );
-}
-
-#[test]
-fn the_first_checkpoint_is_a_root_commit_without_task_history() {
-    let f = fixture();
-    task_repository(&f.ws);
-    std::fs::write(f.ws.join("second.txt"), "two").unwrap();
-    git(&f.ws, &["add", "second.txt"]);
-    git(&f.ws, &["commit", "-qm", "second"]);
-    let repo = open(&f, &[]);
-    let staged = repo.stage().unwrap();
-    let first = repo
-        .chain(None, staged.tree, 50_000_000, "checkpoint")
-        .unwrap();
-    assert_eq!(first.parent, None);
-    let private = git2::Repository::open_bare(f.state.join("workspace.git")).unwrap();
-    assert_eq!(
-        private
-            .find_commit(first.commits[0])
-            .unwrap()
-            .parent_count(),
-        0
-    );
-    let task_head = git2::Oid::from_str(&text(git(&f.ws, &["rev-parse", "HEAD"]))).unwrap();
-    assert!(
-        private.find_commit(task_head).is_err(),
-        "the task repository's objects are not reachable from the private repository"
-    );
-    repo.set_pushed("refs/heads/sessions/test", first.commits[0])
-        .unwrap();
-    std::fs::write(f.ws.join("tracked.txt"), "changed again").unwrap();
-    let next = repo
-        .chain(
-            Some(first.commits[0]),
-            repo.stage().unwrap().tree,
-            50_000_000,
-            "checkpoint",
-        )
-        .unwrap();
-    let delta = repo.pack(next.commits[0], &[first.commits[0]]).unwrap();
-    assert!(
-        delta.objects <= 3,
-        "only the commit, its tree and one blob: {}",
-        delta.objects
-    );
-    let unchanged = repo
-        .chain(
-            Some(next.commits[0]),
-            repo.stage().unwrap().tree,
-            50_000_000,
-            "checkpoint",
-        )
-        .unwrap();
-    assert!(unchanged.commits.is_empty());
-}
-
-#[test]
-fn files_over_the_storage_blob_cap_are_skipped_even_within_the_pack_budget() {
-    let f = fixture();
-    std::fs::write(f.ws.join("small.txt"), "small").unwrap();
-    std::fs::write(f.ws.join("model.bin"), noise(32_000_001, 7)).unwrap();
-    let repo = open(&f, &[]);
-    let chain = repo
-        .chain(None, repo.stage().unwrap().tree, 90_000_000, "checkpoint")
-        .unwrap();
-    assert!(chain
-        .skipped
-        .iter()
-        .any(|s| s.path == "model.bin" && s.reason == SkipReason::TooLarge));
-    let private = git2::Repository::open_bare(f.state.join("workspace.git")).unwrap();
-    let head = private.find_commit(*chain.commits.last().unwrap()).unwrap();
-    assert_eq!(
-        files(&f, head.tree_id()).keys().collect::<Vec<_>>(),
-        vec!["small.txt"]
     );
 }
 
@@ -251,6 +174,7 @@ fn private_state_inside_the_workspace_is_excluded() {
     repo.write_exclude(
         &ignore_defaults(),
         &[state.clone(), f.ws.join("custom state")],
+        &[],
     )
     .unwrap();
     let staged = repo.stage().unwrap();
@@ -258,108 +182,6 @@ fn private_state_inside_the_workspace_is_excluded() {
     let tree = repo2.find_tree(staged.tree).unwrap();
     let names: Vec<String> = tree.iter().map(|e| e.name().unwrap().to_owned()).collect();
     assert_eq!(names, vec!["keep.txt".to_owned()]);
-}
-
-#[test]
-fn large_change_sets_split_into_chained_commits_within_budget() {
-    let f = fixture();
-    for i in 0..6u8 {
-        std::fs::write(f.ws.join(format!("part-{i}.bin")), noise(60_000, i)).unwrap();
-    }
-    std::fs::write(f.ws.join("huge.bin"), noise(300_000, 99)).unwrap();
-    let repo = open(&f, &[]);
-    let staged = repo.stage().unwrap();
-    let chain = repo
-        .chain(None, staged.tree, 150_000, "checkpoint")
-        .unwrap();
-    assert!(chain.commits.len() >= 3, "{}", chain.commits.len());
-    assert_eq!(chain.parent, None);
-    assert!(chain
-        .skipped
-        .iter()
-        .any(|s| s.path == "huge.bin" && s.reason == SkipReason::TooLarge));
-    let mut previous: Option<git2::Oid> = None;
-    for commit in &chain.commits {
-        let pack = repo.pack(*commit, previous.as_slice()).unwrap();
-        assert!(pack.bytes.len() <= 150_000, "{}", pack.bytes.len());
-        previous = Some(*commit);
-    }
-    let last = git2::Repository::open_bare(f.state.join("workspace.git")).unwrap();
-    let head = last.find_commit(*chain.commits.last().unwrap()).unwrap();
-    let final_tree = files(&f, head.tree_id());
-    assert_eq!(
-        final_tree.keys().filter(|p| p.starts_with("part-")).count(),
-        6
-    );
-    assert!(!final_tree.contains_key("huge.bin"));
-    for pair in chain.commits.windows(2) {
-        let child = last.find_commit(pair[1]).unwrap();
-        assert_eq!(child.parent_ids().collect::<Vec<_>>(), vec![pair[0]]);
-    }
-}
-
-#[test]
-fn a_head_missing_locally_gets_a_full_tree_commit_on_top_of_it() {
-    let f = fixture();
-    std::fs::write(f.ws.join("a.txt"), "a").unwrap();
-    let repo = open(&f, &[]);
-    let staged = repo.stage().unwrap();
-    let foreign = git2::Oid::from_str("1111111111111111111111111111111111111111").unwrap();
-    let chain = repo
-        .chain(Some(foreign), staged.tree, 50_000_000, "checkpoint")
-        .unwrap();
-    assert_eq!(chain.parent, Some(foreign));
-    let pack = repo.pack(chain.commits[0], &[foreign]).unwrap();
-    assert!(pack.objects >= 3, "commit, tree and blob: {}", pack.objects);
-}
-
-#[test]
-fn deletions_follow_the_working_tree() {
-    let f = fixture();
-    task_repository(&f.ws);
-    let repo = open(&f, &[]);
-    let first = repo
-        .chain(None, repo.stage().unwrap().tree, 50_000_000, "checkpoint")
-        .unwrap();
-    std::fs::remove_file(f.ws.join("tracked.txt")).unwrap();
-    let next = repo
-        .chain(
-            first.commits.last().copied(),
-            repo.stage().unwrap().tree,
-            50_000_000,
-            "checkpoint",
-        )
-        .unwrap();
-    let private = git2::Repository::open_bare(f.state.join("workspace.git")).unwrap();
-    assert!(
-        !files(&f, private.find_commit(next.commits[0]).unwrap().tree_id())
-            .contains_key("tracked.txt")
-    );
-}
-
-#[test]
-fn empty_initial_workspace_still_has_a_checkpoint_commit() {
-    let f = fixture();
-    let repo = open(&f, &[]);
-    let chain = repo
-        .chain(None, repo.stage().unwrap().tree, 50_000_000, "checkpoint")
-        .unwrap();
-    assert_eq!(chain.commits.len(), 1);
-}
-
-#[test]
-fn pack_overhead_does_not_push_a_file_past_the_budget() {
-    let f = fixture();
-    std::fs::write(f.ws.join("almost-full.bin"), noise(4_000, 9)).unwrap();
-    let repo = open(&f, &[]);
-    let chain = repo
-        .chain(None, repo.stage().unwrap().tree, 4_010, "checkpoint")
-        .unwrap();
-    assert!(chain
-        .skipped
-        .iter()
-        .any(|s| s.path == "almost-full.bin" && s.reason == SkipReason::TooLarge));
-    assert!(repo.pack(chain.commits[0], &[]).unwrap().bytes.len() <= 4_010);
 }
 
 #[test]
@@ -375,18 +197,6 @@ fn uncommitted_nested_repositories_are_excluded() {
         .skipped
         .iter()
         .any(|s| s.path == "nested" && s.reason == SkipReason::NestedRepository));
-}
-
-#[test]
-fn unknown_advertised_objects_do_not_prevent_local_history_packing() {
-    let f = fixture();
-    std::fs::write(f.ws.join("file"), "content").unwrap();
-    let repo = open(&f, &[]);
-    let chain = repo
-        .chain(None, repo.stage().unwrap().tree, 50_000_000, "checkpoint")
-        .unwrap();
-    let unknown = git2::Oid::from_str("2222222222222222222222222222222222222222").unwrap();
-    assert_eq!(repo.pack(chain.commits[0], &[unknown]).unwrap().objects, 3);
 }
 
 #[test]
@@ -408,37 +218,7 @@ fn workspace_ignore_negation_cannot_include_private_state() {
 }
 
 #[test]
-fn split_after_a_foreign_head_retains_every_admitted_file() {
-    let f = fixture();
-    for i in 0..6u8 {
-        std::fs::write(f.ws.join(format!("part-{i}.bin")), noise(60_000, i)).unwrap();
-    }
-    let repo = open(&f, &[]);
-    let foreign = git2::Oid::from_str("1111111111111111111111111111111111111111").unwrap();
-    let chain = repo
-        .chain(
-            Some(foreign),
-            repo.stage().unwrap().tree,
-            150_000,
-            "checkpoint",
-        )
-        .unwrap();
-    assert!(chain.skipped.is_empty());
-    let private = git2::Repository::open_bare(f.state.join("workspace.git")).unwrap();
-    let final_tree = private
-        .find_commit(*chain.commits.last().unwrap())
-        .unwrap()
-        .tree_id();
-    assert_eq!(files(&f, final_tree).len(), 6);
-    let mut previous = foreign;
-    for commit in chain.commits {
-        assert!(repo.pack(commit, &[previous]).unwrap().bytes.len() <= 150_000);
-        previous = commit;
-    }
-}
-
-#[test]
-fn cancelled_checkpoint_does_not_stage_pack_or_advance_refs() {
+fn cancelled_checkpoint_does_not_capture_or_advance_refs() {
     let f = fixture();
     std::fs::write(f.ws.join("task.txt"), "before").unwrap();
     let cancellation = checkpoint_repo::Cancellation::default();
@@ -449,14 +229,10 @@ fn cancelled_checkpoint_does_not_stage_pack_or_advance_refs() {
     )
     .unwrap();
     let staged = repo.stage().unwrap();
-    let chain = repo.chain(None, staged.tree, 1_000_000, "before").unwrap();
-    let commit = chain.commits[0];
     cancellation.cancel();
     std::fs::write(f.ws.join("task.txt"), "after").unwrap();
     assert!(repo.stage().is_err());
-    assert!(repo.chain(None, staged.tree, 1_000_000, "after").is_err());
-    assert!(repo.pack(commit, &[]).is_err());
-    assert!(repo.set_pushed("refs/heads/session", commit).is_err());
+    assert!(repo.snapshot().is_err());
     let raw = git2::Repository::open_bare(f.state.join("workspace.git")).unwrap();
     assert!(raw.refname_to_id("refs/heads/session").is_err());
     assert_eq!(files(&f, staged.tree)["task.txt"].1, b"before");
@@ -474,4 +250,40 @@ fn cancelled_preparation_does_not_initialize_a_repository() {
     )
     .is_err());
     assert!(!f.state.join("workspace.git").exists());
+}
+
+#[test]
+fn manifest_captures_modes_links_deletions_and_hard_credential_exclusion() {
+    use sha2::{Digest, Sha256};
+    let f = fixture();
+    std::fs::write(f.ws.join("keep.txt"), "hello").unwrap();
+    std::fs::write(f.ws.join(".env"), "secret").unwrap();
+    std::fs::write(f.ws.join(".gitignore"), "!.env\n!deploy.pem\n").unwrap();
+    std::fs::write(f.ws.join("deploy.pem"), "private").unwrap();
+    std::os::unix::fs::symlink("keep.txt", f.ws.join("alias")).unwrap();
+    let repo = open(&f, &[]);
+    let snapshot = repo.snapshot().unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&snapshot.manifest).unwrap();
+    assert_eq!(
+        manifest["files"]["keep.txt"]["sha256"],
+        format!("{:x}", Sha256::digest(b"hello"))
+    );
+    assert_eq!(manifest["files"]["keep.txt"]["mode"], 420);
+    assert_eq!(manifest["files"]["alias"]["link"], "keep.txt");
+    assert!(manifest["files"].get(".env").is_none());
+    assert!(manifest["files"].get("deploy.pem").is_none());
+    std::fs::remove_file(f.ws.join("keep.txt")).unwrap();
+    let next: serde_json::Value =
+        serde_json::from_slice(&repo.snapshot().unwrap().manifest).unwrap();
+    assert!(next["files"].get("keep.txt").is_none());
+}
+#[test]
+fn empty_workspace_has_a_manifest_and_large_blobs_are_reported() {
+    let f = fixture();
+    let repo = open(&f, &[]);
+    assert_eq!(repo.snapshot().unwrap().manifest, b"{\"files\":{}}");
+    std::fs::write(f.ws.join("large.bin"), vec![0u8; 32_000_001]).unwrap();
+    let snapshot = repo.snapshot().unwrap();
+    assert!(snapshot.blobs.is_empty());
+    assert_eq!(snapshot.skipped[0].reason, SkipReason::TooLarge);
 }

@@ -1165,9 +1165,21 @@ Bounded queue snapshot. wait_seconds is a maximum; server may return immediately
 
 ### `sikaru compute-workspaces`
 
+#### `sikaru compute-workspaces policy`
+
+Read the pinned publication rules before capturing workspace files.
+
+`GET /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-policy`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--attachment-id` | `string` | Yes |  |
+| `--run-id` | `string` | No |  |
+
 #### `sikaru compute-workspaces record`
 
-Record a pushed commit as this session's workspace checkpoint. Idempotent on ``commit_sha``.
+Record a verified uploaded manifest as this session's workspace checkpoint.
 
 `POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-checkpoints`
 
@@ -1177,11 +1189,11 @@ Record a pushed commit as this session's workspace checkpoint. Idempotent on ``c
 | `--attachment-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
-#### `sikaru compute-workspaces remote`
+#### `sikaru compute-workspaces upload`
 
-Scoped git remote for this session's workspace branch. Request it again before ``expires_at``.
+Upload file or manifest bytes before acknowledging a workspace checkpoint.
 
-`POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-remote`
+`PUT /v1/projects/{project_id}/compute-attachments/{attachment_id}/workspace-content`
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -3133,6 +3145,38 @@ Recover Managed Run
 | `--project-id` | `string` | Yes |  |
 | `--run-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru runs resume`
+
+Resume the same retained turn. A refused request does not change its state.
+
+`POST /v1/projects/{project_id}/runs/{run_id}/resume`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--run-id` | `string` | Yes |  |
+
+#### `sikaru runs resume-all`
+
+Recheck up to 100 authorized needs-action runs and jobs; only cleared stops resume.
+
+`POST /v1/projects/{project_id}/runs/resume`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+#### `sikaru runs resume-count`
+
+Count needs-action work the caller can control, grouped by funding reason.
+
+`GET /v1/projects/{project_id}/runs/resume/count`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
 
 #### `sikaru runs retry`
 

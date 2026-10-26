@@ -13,6 +13,8 @@ pub struct TranscriptEvent {
     pub label: String,
     #[serde(default)]
     pub sequence: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<FundingWait>,
 }
 
 impl TranscriptEvent {
@@ -28,6 +30,7 @@ pub struct TranscriptEventBuilder {
     id: Option<String>,
     label: Option<String>,
     sequence: Option<i64>,
+    waiting: Option<FundingWait>,
 }
 
 impl TranscriptEventBuilder {
@@ -51,6 +54,11 @@ impl TranscriptEventBuilder {
         self
     }
 
+    pub fn waiting(mut self, value: FundingWait) -> Self {
+        self.waiting = Some(value);
+        self
+    }
+
     /// Consumes the builder and constructs a [`TranscriptEvent`].
     /// This method will fail if any of the following fields are not set:
     /// - [`created_at`](TranscriptEventBuilder::created_at)
@@ -63,6 +71,7 @@ impl TranscriptEventBuilder {
             id: self.id.ok_or_else(|| BuildError::missing_field("id"))?,
             label: self.label.ok_or_else(|| BuildError::missing_field("label"))?,
             sequence: self.sequence.ok_or_else(|| BuildError::missing_field("sequence"))?,
+            waiting: self.waiting,
         })
     }
 }
