@@ -31,7 +31,7 @@ pub async fn execute(m: &ArgMatches, ctx: &AppContext) -> Value {
 
 async fn project_check(m: &ArgMatches, ctx: &AppContext) -> Value {
     let Some(project) = m.get_one::<String>("project") else {
-        return json!({"name":"project_access","ok":false,"help":"Set SIKARU_PROJECT or pass --project PROJECT. Run sikaru auth login to configure credentials."});
+        return json!({"name":"project_access","ok":false,"help":"Run sikaru config set project PROJECT, set SIKARU_PROJECT or pass --project PROJECT. Run sikaru login to configure credentials."});
     };
     let client = crate::sdk::client(ctx);
     let result = call(client.managed_agents.list_managed_agents(project, None)).await;
@@ -45,9 +45,9 @@ async fn project_check(m: &ArgMatches, ctx: &AppContext) -> Value {
 
 fn advice(error: &anyhow::Error) -> &'static str {
     match error.downcast_ref::<TransportFailure>() {
-        Some(TransportFailure::Rejected(401)) => "Run sikaru auth login, then retry doctor.",
+        Some(TransportFailure::Rejected(401)) => "Run sikaru login, then retry doctor.",
         Some(TransportFailure::Rejected(403)) => "Check your project membership and API key scopes.",
-        Some(TransportFailure::Rejected(404)) => "Project not found. Check --project or SIKARU_PROJECT.",
+        Some(TransportFailure::Rejected(404)) => "Project not found. Check --project, SIKARU_PROJECT or sikaru config show.",
         _ => "Project access could not be verified. Check connectivity, --base-url, and service availability. No run was started.",
     }
 }

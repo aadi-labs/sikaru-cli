@@ -120,6 +120,62 @@ impl ManagedAgentsClient {
             .await
     }
 
+    /// One managed agent in the project: the same public summary the list returns.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Additional request options such as headers, timeout, etc.
+    ///
+    /// # Returns
+    ///
+    /// JSON response from the API
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use sikaru_sdk::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let config = ClientConfig {
+    ///         token: Some("<token>".to_string()),
+    ///         ..Default::default()
+    ///     };
+    ///     let client = SikaruClient::new(config).expect("Failed to build client");
+    ///     client
+    ///         .managed_agents
+    ///         .get(&"project_id".to_string(), &"agent_slug".to_string(), None)
+    ///         .await;
+    /// }
+    /// ```
+    pub async fn get(
+        &self,
+        project_id: &str,
+        agent_slug: &str,
+        options: Option<RequestOptions>,
+    ) -> Result<ManagedAgentRead, ApiError> {
+        let endpoint_auth_headers = self
+            .http_client
+            .resolve_endpoint_auth_headers(&options, &[&["BearerAuth"] as &[&str]])
+            .await?;
+        let options = {
+            let mut o = options.unwrap_or_default();
+            for (header_key, header_value) in endpoint_auth_headers {
+                o.additional_headers.insert(header_key, header_value);
+            }
+            Some(o)
+        };
+        self.http_client
+            .execute_request(
+                Method::GET,
+                &format!("v1/projects/{}/managed-agents/{}", project_id, agent_slug),
+                None,
+                None,
+                options,
+            )
+            .await
+    }
+
     /// Delete an agent that has never gone live, with its drafts, checks and schedules.
     ///
     /// # Arguments

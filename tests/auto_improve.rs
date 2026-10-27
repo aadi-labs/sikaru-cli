@@ -9,6 +9,7 @@ fn startup_flag_is_optional_and_sent_as_a_boolean() {
     ] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_sikaru"));
         command.args([
+            "agent",
             "runs",
             "start",
             "--project-id",
@@ -55,6 +56,7 @@ fn startup_flag_is_optional_and_sent_as_a_boolean() {
 fn session_startup_flag_is_forwarded() {
     let output = Command::new(env!("CARGO_BIN_EXE_sikaru"))
         .args([
+            "agent",
             "execution-sessions",
             "create",
             "--project-id",
@@ -121,6 +123,7 @@ fn optional_workspace_provenance_flags_preserve_values() {
     for (extra, success) in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_sikaru"));
         command.args([
+            "agent",
             "runs",
             "start",
             "--project-id",

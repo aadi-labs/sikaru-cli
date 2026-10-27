@@ -11,20 +11,21 @@ pub mod resources;
 
 pub use resources::{
     ActivationClient, AgentDocumentsClient, AgentImportsClient, AgentsClient, ApiClient,
-    AuthClient, CapabilityCeilingsClient, ChangesetsClient, ChannelsClient, ChecksClient,
-    ComputeAttachmentsClient, ComputeCredentialsClient, ComputeEnvironmentsClient,
-    ComputeOperationsClient, ComputeWorkersClient, ComputeWorkspacesClient, ConnectionsClient,
+    AuthClient, CapabilityCeilingsClient, ChangesetsClient, ChannelsClient, ChatClient,
+    ChecksClient, CompletionsClient, ComputeAttachmentsClient, ComputeCredentialsClient,
+    ComputeEnvironmentsClient, ComputeOperationsClient, ComputeWorkspacesClient, ConnectionsClient,
     ContextRegistryClient, ConversationsClient, DatasetsClient, DeploymentsClient,
     EnvironmentsClient, EvaluationComparisonsClient, EvaluationCriteriaClient,
     EvaluationJobsClient, EvaluationResultsClient, EvaluatorRunsClient, ExecutionObjectivesClient,
     ExecutionSessionsClient, ExecutionsClient, FeedbackClient, GitCredentialsClient,
     HarnessesClient, HttpChannelsClient, ImportSessionsClient, IssueClustersClient,
     JudgeAlignmentClient, ManagedAgentsClient, MemoryRegistryClient, ModelGatewayClient,
-    ModelSettingsClient, OnlineEvaluationsClient, OrganizationsClient, PersonalChannelsClient,
-    ReleaseWatchesClient, RetentionPoliciesClient, ReviewQueueClient, RunReferencesClient,
-    RunSchedulesClient, RunWebhooksClient, RunsClient, SessionsClient, SpecialistsClient,
-    ToolProvidersClient, TraceImportConnectionsClient, TraceImportsClient, TraceStreamsClient,
-    WorkflowIntentsClient, WorkflowRunsClient, WorkflowsClient,
+    ModelSettingsClient, ModelsClient, OnlineEvaluationsClient, OrganizationsClient,
+    PersonalChannelsClient, ReleaseWatchesClient, ResponsesClient, RetentionPoliciesClient,
+    ReviewQueueClient, RunReferencesClient, RunSchedulesClient, RunWebhooksClient, RunsClient,
+    SessionsClient, SpecialistsClient, ToolProvidersClient, TraceImportConnectionsClient,
+    TraceImportsClient, TraceStreamsClient, WorkflowIntentsClient, WorkflowRunsClient,
+    WorkflowsClient,
 };
 
 pub use sikaru_types::*;

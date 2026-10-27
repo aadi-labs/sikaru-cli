@@ -4,6 +4,7 @@ use std::process::Command;
 fn direct_run_uses_environment_and_workspace_provenance() {
     let output = Command::new(env!("CARGO_BIN_EXE_sikaru"))
         .args([
+            "agent",
             "runs",
             "start",
             "--project-id",

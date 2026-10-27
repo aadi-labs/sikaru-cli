@@ -64,6 +64,8 @@ pub fn client(ctx: &AppContext) -> sikaru_sdk::api::ApiClient {
         config,
         auth: sikaru_sdk::api::AuthClient { http_client: http_client.clone() },
         http_channels: sikaru_sdk::api::HttpChannelsClient { http_client: http_client.clone() },
+        completions: sikaru_sdk::api::CompletionsClient { http_client: http_client.clone() },
+        models: sikaru_sdk::api::ModelsClient { http_client: http_client.clone() },
         organizations: sikaru_sdk::api::OrganizationsClient { http_client: http_client.clone() },
         personal_channels: sikaru_sdk::api::PersonalChannelsClient { http_client: http_client.clone() },
         activation: sikaru_sdk::api::ActivationClient { http_client: http_client.clone() },
@@ -78,7 +80,6 @@ pub fn client(ctx: &AppContext) -> sikaru_sdk::api::ApiClient {
         compute_workspaces: sikaru_sdk::api::ComputeWorkspacesClient { http_client: http_client.clone() },
         compute_credentials: sikaru_sdk::api::ComputeCredentialsClient { http_client: http_client.clone() },
         compute_environments: sikaru_sdk::api::ComputeEnvironmentsClient { http_client: http_client.clone() },
-        compute_workers: sikaru_sdk::api::ComputeWorkersClient { http_client: http_client.clone() },
         connections: sikaru_sdk::api::ConnectionsClient { http_client: http_client.clone() },
         context_registry: sikaru_sdk::api::ContextRegistryClient { http_client: http_client.clone() },
         conversations: sikaru_sdk::api::ConversationsClient { http_client: http_client.clone() },
@@ -120,7 +121,12 @@ pub fn client(ctx: &AppContext) -> sikaru_sdk::api::ApiClient {
         workflow_intents: sikaru_sdk::api::WorkflowIntentsClient { http_client: http_client.clone() },
         workflow_runs: sikaru_sdk::api::WorkflowRunsClient { http_client: http_client.clone() },
         workflows: sikaru_sdk::api::WorkflowsClient { http_client: http_client.clone() },
+        responses: sikaru_sdk::api::ResponsesClient { http_client: http_client.clone() },
         trace_streams: sikaru_sdk::api::TraceStreamsClient { http_client: http_client.clone() },
+        chat: sikaru_sdk::api::ChatClient {
+            http_client: http_client.clone(),
+            completions: sikaru_sdk::api::resources::chat::CompletionsClient2 { http_client: http_client.clone() },
+        },
     }
 }
 

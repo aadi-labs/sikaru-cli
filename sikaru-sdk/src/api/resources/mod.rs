@@ -4,6 +4,8 @@
 //!
 //! - **Auth**
 //! - **HttpChannels**
+//! - **Completions**
+//! - **Models**
 //! - **Organizations**
 //! - **PersonalChannels**
 //! - **Activation**
@@ -18,7 +20,6 @@
 //! - **ComputeWorkspaces**
 //! - **ComputeCredentials**
 //! - **ComputeEnvironments**
-//! - **ComputeWorkers**
 //! - **Connections**
 //! - **ContextRegistry**
 //! - **Conversations**
@@ -60,7 +61,9 @@
 //! - **WorkflowIntents**
 //! - **WorkflowRuns**
 //! - **Workflows**
+//! - **Responses**
 //! - **TraceStreams**
+//! - **Chat**
 
 use crate::{ApiError, ClientConfig};
 
@@ -72,12 +75,13 @@ pub mod auth;
 pub mod capability_ceilings;
 pub mod changesets;
 pub mod channels;
+pub mod chat;
 pub mod checks;
+pub mod completions;
 pub mod compute_attachments;
 pub mod compute_credentials;
 pub mod compute_environments;
 pub mod compute_operations;
-pub mod compute_workers;
 pub mod compute_workspaces;
 pub mod connections;
 pub mod context_registry;
@@ -104,10 +108,12 @@ pub mod managed_agents;
 pub mod memory_registry;
 pub mod model_gateway;
 pub mod model_settings;
+pub mod models;
 pub mod online_evaluations;
 pub mod organizations;
 pub mod personal_channels;
 pub mod release_watches;
+pub mod responses;
 pub mod retention_policies;
 pub mod review_queue;
 pub mod run_references;
@@ -127,6 +133,8 @@ pub struct ApiClient {
     pub config: ClientConfig,
     pub auth: AuthClient,
     pub http_channels: HttpChannelsClient,
+    pub completions: CompletionsClient,
+    pub models: ModelsClient,
     pub organizations: OrganizationsClient,
     pub personal_channels: PersonalChannelsClient,
     pub activation: ActivationClient,
@@ -141,7 +149,6 @@ pub struct ApiClient {
     pub compute_workspaces: ComputeWorkspacesClient,
     pub compute_credentials: ComputeCredentialsClient,
     pub compute_environments: ComputeEnvironmentsClient,
-    pub compute_workers: ComputeWorkersClient,
     pub connections: ConnectionsClient,
     pub context_registry: ContextRegistryClient,
     pub conversations: ConversationsClient,
@@ -183,7 +190,9 @@ pub struct ApiClient {
     pub workflow_intents: WorkflowIntentsClient,
     pub workflow_runs: WorkflowRunsClient,
     pub workflows: WorkflowsClient,
+    pub responses: ResponsesClient,
     pub trace_streams: TraceStreamsClient,
+    pub chat: ChatClient,
 }
 
 impl ApiClient {
@@ -192,6 +201,8 @@ impl ApiClient {
             config: config.clone(),
             auth: AuthClient::new(config.clone())?,
             http_channels: HttpChannelsClient::new(config.clone())?,
+            completions: CompletionsClient::new(config.clone())?,
+            models: ModelsClient::new(config.clone())?,
             organizations: OrganizationsClient::new(config.clone())?,
             personal_channels: PersonalChannelsClient::new(config.clone())?,
             activation: ActivationClient::new(config.clone())?,
@@ -206,7 +217,6 @@ impl ApiClient {
             compute_workspaces: ComputeWorkspacesClient::new(config.clone())?,
             compute_credentials: ComputeCredentialsClient::new(config.clone())?,
             compute_environments: ComputeEnvironmentsClient::new(config.clone())?,
-            compute_workers: ComputeWorkersClient::new(config.clone())?,
             connections: ConnectionsClient::new(config.clone())?,
             context_registry: ContextRegistryClient::new(config.clone())?,
             conversations: ConversationsClient::new(config.clone())?,
@@ -248,7 +258,9 @@ impl ApiClient {
             workflow_intents: WorkflowIntentsClient::new(config.clone())?,
             workflow_runs: WorkflowRunsClient::new(config.clone())?,
             workflows: WorkflowsClient::new(config.clone())?,
+            responses: ResponsesClient::new(config.clone())?,
             trace_streams: TraceStreamsClient::new(config.clone())?,
+            chat: ChatClient::new(config.clone())?,
         })
     }
 }
@@ -261,12 +273,13 @@ pub use auth::AuthClient;
 pub use capability_ceilings::CapabilityCeilingsClient;
 pub use changesets::ChangesetsClient;
 pub use channels::ChannelsClient;
+pub use chat::ChatClient;
 pub use checks::ChecksClient;
+pub use completions::CompletionsClient;
 pub use compute_attachments::ComputeAttachmentsClient;
 pub use compute_credentials::ComputeCredentialsClient;
 pub use compute_environments::ComputeEnvironmentsClient;
 pub use compute_operations::ComputeOperationsClient;
-pub use compute_workers::ComputeWorkersClient;
 pub use compute_workspaces::ComputeWorkspacesClient;
 pub use connections::ConnectionsClient;
 pub use context_registry::ContextRegistryClient;
@@ -293,10 +306,12 @@ pub use managed_agents::ManagedAgentsClient;
 pub use memory_registry::MemoryRegistryClient;
 pub use model_gateway::ModelGatewayClient;
 pub use model_settings::ModelSettingsClient;
+pub use models::ModelsClient;
 pub use online_evaluations::OnlineEvaluationsClient;
 pub use organizations::OrganizationsClient;
 pub use personal_channels::PersonalChannelsClient;
 pub use release_watches::ReleaseWatchesClient;
+pub use responses::ResponsesClient;
 pub use retention_policies::RetentionPoliciesClient;
 pub use review_queue::ReviewQueueClient;
 pub use run_references::RunReferencesClient;

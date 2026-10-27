@@ -91,9 +91,7 @@ impl ChecksClient {
     ///             &"agent_slug".to_string(),
     ///             &CreateCheck {
     ///                 environment: CheckEnvironment {
-    ///                     compute_environment_id: None,
     ///                     kind: CheckEnvironmentKind::Managed,
-    ///                     workspace_provenance: None,
     ///                 },
     ///                 idempotency_key: "idempotency_key".to_string(),
     ///                 name: "name".to_string(),

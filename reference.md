@@ -12,12 +12,13 @@ Full command reference for `sikaru`.
 - [`sikaru capability-ceilings`](#sikaru-capability-ceilings)
 - [`sikaru changesets`](#sikaru-changesets)
 - [`sikaru channels`](#sikaru-channels)
+- [`sikaru chat completions`](#sikaru-chat-completions)
 - [`sikaru checks`](#sikaru-checks)
+- [`sikaru completions`](#sikaru-completions)
 - [`sikaru compute-attachments`](#sikaru-compute-attachments)
 - [`sikaru compute-credentials`](#sikaru-compute-credentials)
 - [`sikaru compute-environments`](#sikaru-compute-environments)
 - [`sikaru compute-operations`](#sikaru-compute-operations)
-- [`sikaru compute-workers`](#sikaru-compute-workers)
 - [`sikaru compute-workspaces`](#sikaru-compute-workspaces)
 - [`sikaru connections`](#sikaru-connections)
 - [`sikaru context-registry`](#sikaru-context-registry)
@@ -44,10 +45,12 @@ Full command reference for `sikaru`.
 - [`sikaru memory-registry`](#sikaru-memory-registry)
 - [`sikaru model-gateway`](#sikaru-model-gateway)
 - [`sikaru model-settings`](#sikaru-model-settings)
+- [`sikaru models`](#sikaru-models)
 - [`sikaru online-evaluations`](#sikaru-online-evaluations)
 - [`sikaru organizations`](#sikaru-organizations)
 - [`sikaru personal-channels`](#sikaru-personal-channels)
 - [`sikaru release-watches`](#sikaru-release-watches)
+- [`sikaru responses`](#sikaru-responses)
 - [`sikaru retention-policies`](#sikaru-retention-policies)
 - [`sikaru review-queue`](#sikaru-review-queue)
 - [`sikaru run-references`](#sikaru-run-references)
@@ -825,6 +828,20 @@ Update Urls
 
 ---
 
+### `sikaru chat completions`
+
+#### `sikaru chat completions create`
+
+Chat
+
+`POST /v1/chat/completions`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
 ### `sikaru checks`
 
 #### `sikaru checks create`
@@ -877,6 +894,20 @@ Start the check's task as a real run of the agent's active release; the result s
 
 ---
 
+### `sikaru completions`
+
+#### `sikaru completions create`
+
+Completions
+
+`POST /v1/completions`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
 ### `sikaru compute-attachments`
 
 #### `sikaru compute-attachments abandon`
@@ -904,7 +935,7 @@ Idempotently request stopping. This never asserts child cleanup.
 
 #### `sikaru compute-attachments claim`
 
-Same attachment/key/worker returns the same launch identity, never another launch.
+Same attachment/key returns the same launch identity, never another launch.
 
 `POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/claim`
 
@@ -1032,7 +1063,7 @@ Executor can stop its own attachment and cancel its runs; cleanup is separately 
 
 #### `sikaru compute-attachments teardown`
 
-Controller or owning worker attests sandbox teardown; clean parked turns stay resumable.
+Controller attests sandbox teardown; clean parked turns stay resumable.
 
 `POST /v1/projects/{project_id}/compute-attachments/{attachment_id}/teardown`
 
@@ -1132,34 +1163,6 @@ Only exact immutable receipt retries are idempotent; changed content conflicts.
 | `--project-id` | `string` | Yes |  |
 | `--attachment-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
-
----
-
-### `sikaru compute-workers`
-
-#### `sikaru compute-workers issue-credential`
-
-Issue a new secret once; retries issue independent revocable credentials.
-
-`POST /v1/projects/{project_id}/compute-environments/{environment_id}/credentials`
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--project-id` | `string` | Yes |  |
-| `--environment-id` | `string` | Yes |  |
-
-#### `sikaru compute-workers poll`
-
-Bounded queue snapshot. wait_seconds is a maximum; server may return immediately.
-
-`GET /v1/projects/{project_id}/compute-environments/{environment_id}/queue`
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--project-id` | `string` | Yes |  |
-| `--environment-id` | `string` | Yes |  |
-| `--wait-seconds` | `integer` | No |  |
-| `--limit` | `integer` | No |  |
 
 ---
 
@@ -2522,6 +2525,17 @@ Delete an agent that has never gone live, with its drafts, checks and schedules.
 | `--project-id` | `string` | Yes |  |
 | `--agent-slug` | `string` | Yes |  |
 
+#### `sikaru managed-agents get`
+
+One managed agent in the project: the same public summary the list returns.
+
+`GET /v1/projects/{project_id}/managed-agents/{agent_slug}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--project-id` | `string` | Yes |  |
+| `--agent-slug` | `string` | Yes |  |
+
 #### `sikaru managed-agents get-definition-revision`
 
 Get Definition Revision
@@ -2611,6 +2625,26 @@ Update Model Settings
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru models`
+
+#### `sikaru models list`
+
+Models
+
+`GET /v1/models`
+
+#### `sikaru models retrieve`
+
+Model
+
+`GET /v1/models/{model}`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--model` | `string` | Yes |  |
 
 ---
 
@@ -2872,6 +2906,20 @@ Create Release Watch
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--project-id` | `string` | Yes |  |
+| `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
+
+---
+
+### `sikaru responses`
+
+#### `sikaru responses create`
+
+Responses
+
+`POST /v1/responses`
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
 | `--json` | `JSON` | Yes | Request body as JSON (or use individual body-field flags) |
 
 ---

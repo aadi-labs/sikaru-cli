@@ -16,7 +16,7 @@ pub fn prompt(m: &ArgMatches) -> Result<Option<String>> {
     }
     if text.is_none() && m.get_one::<String>("resume").is_none() {
         bail!(InvalidInput(
-            "Supply a task: sikaru exec 'Your task', or pipe it to sikaru exec -."
+            "Supply a task: sikaru agent run AGENT 'Your task', or pipe it to sikaru agent run AGENT -."
         ));
     }
     Ok(text)
@@ -49,7 +49,7 @@ pub fn source(m: &ArgMatches) -> Result<Option<String>> {
 fn read_stdin() -> Result<String> {
     if std::io::stdin().is_terminal() {
         bail!(InvalidInput(
-            "Pipe a task to stdin when using '-'. For a conversation, use sikaru exec."
+            "Pipe a task to stdin when using '-'. For a conversation, use sikaru agent run AGENT."
         ));
     }
     read_text(std::io::stdin())

@@ -105,7 +105,7 @@ impl ComputeOperationsClient {
     ///         .poll(
     ///             &"project_id".to_string(),
     ///             &"attachment_id".to_string(),
-    ///             &ComputeOperationsPollQueryRequest {
+    ///             &PollQueryRequest {
     ///                 ..Default::default()
     ///             },
     ///             None,
@@ -117,7 +117,7 @@ impl ComputeOperationsClient {
         &self,
         project_id: &str,
         attachment_id: &str,
-        request: &ComputeOperationsPollQueryRequest,
+        request: &PollQueryRequest,
         options: Option<RequestOptions>,
     ) -> Result<WorkPage, ApiError> {
         let endpoint_auth_headers = self

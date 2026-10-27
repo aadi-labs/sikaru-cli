@@ -75,7 +75,7 @@ impl Transport {
             self.client.compute_operations.poll(
                 &self.binding.project_id,
                 &self.binding.attachment_id,
-                &ComputeOperationsPollQueryRequest {
+                &PollQueryRequest {
                     wait_seconds: Some(1),
                     limit: Some(16),
                 },

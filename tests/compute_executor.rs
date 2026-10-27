@@ -1,28 +1,15 @@
-//! Native executor acceptance at the installed command boundary.
+//! Native executor acceptance. `runtime::serve_with_options` runs in a child copy of this test
+//! binary (see `in_process_executor_child`), so each case observes real stdout, stderr, exit
+//! status and signals without a CLI serve command.
+#![allow(dead_code)]
 use std::process::Command;
-#[test]
-fn serve_is_available_in_the_primary_binary() {
-    let output = Command::new(
-        std::env::var("SIKARU_TEST_INSTALLED")
-            .unwrap_or_else(|_| env!("CARGO_BIN_EXE_sikaru").to_owned()),
-    )
-    .args(["compute", "serve", "--help"])
-    .output()
-    .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("bootstrap"));
-}
 #[test]
 fn generated_api_commands_remain_available() {
     let output = Command::new(
         std::env::var("SIKARU_TEST_INSTALLED")
             .unwrap_or_else(|_| env!("CARGO_BIN_EXE_sikaru").to_owned()),
     )
-    .args(["agents", "--help"])
+    .args(["agent", "agents", "--help"])
     .output()
     .unwrap();
     assert!(output.status.success());
@@ -32,6 +19,71 @@ fn generated_api_commands_remain_available() {
 #[cfg(unix)]
 #[path = "support/git_remote.rs"]
 mod git_remote;
+
+#[cfg(unix)]
+#[path = "../cli/sikaru/compute_checkpoint.rs"]
+mod checkpoint;
+#[cfg(unix)]
+#[path = "../cli/sikaru/compute_checkpoint_repo.rs"]
+mod checkpoint_repo;
+#[cfg(unix)]
+#[path = "../cli/sikaru/compute_config.rs"]
+mod config;
+#[cfg(unix)]
+#[path = "../cli/sikaru/compute_journal.rs"]
+mod journal;
+#[cfg(unix)]
+#[path = "../cli/sikaru/compute_process.rs"]
+mod process;
+#[cfg(unix)]
+#[path = "../cli/sikaru/compute_runtime.rs"]
+mod runtime;
+#[cfg(unix)]
+#[path = "../cli/sikaru/compute_transport.rs"]
+mod transport;
+
+/// Selects child mode and carries the fake gateway's base URL.
+const CHILD_BASE_URL: &str = "SIKARU_TEST_EXECUTOR_BASE_URL";
+const CHILD_SKIP_CHECKPOINTS: &str = "SIKARU_TEST_EXECUTOR_SKIP_CHECKPOINTS";
+
+/// The executor process each case drives: a no-op unless the parent test selected child mode. It
+/// reads the private bootstrap from stdin, serves the attachment in-process, prints the result and
+/// exits with the native outcome code.
+#[cfg(unix)]
+#[test]
+fn in_process_executor_child() {
+    let Ok(base_url) = std::env::var(CHILD_BASE_URL) else {
+        return;
+    };
+    let options = runtime::RunOptions {
+        skip_checkpoints: std::env::var_os(CHILD_SKIP_CHECKPOINTS).is_some(),
+        ..Default::default()
+    };
+    let served = tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let bootstrap: config::Bootstrap = serde_json::from_reader(std::io::stdin())?;
+        let config = fern_cli_sdk::http::HttpConfig::new("sikaru")?;
+        let http = transport::HttpIdentity::from_config(&config)?;
+        runtime::serve_with_options(bootstrap, base_url, http, options).await
+    });
+    let result = served.unwrap_or_else(|_| {
+        serde_json::json!({"status":"recovery_required","reason":"bootstrap_or_journal_rejected"})
+    });
+    println!("{result}");
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    std::process::exit(outcome_code(&result));
+}
+
+/// The documented native outcome codes.
+fn outcome_code(result: &serde_json::Value) -> i32 {
+    match result["status"].as_str() {
+        Some("completed") => 0,
+        Some("approval_required") => 2,
+        Some("cancelled") => 3,
+        Some("recovery_required") => 4,
+        _ => 1,
+    }
+}
 
 #[cfg(unix)]
 mod wire {
@@ -648,9 +700,8 @@ mod wire {
         unsafe {
             libc::kill(child.id().unwrap() as i32, libc::SIGTERM);
         }
-        let output = tokio::time::timeout(Duration::from_secs(15), child.wait_with_output())
+        let output = tokio::time::timeout(Duration::from_secs(15), served(child))
             .await
-            .unwrap()
             .unwrap();
         assert!(
             signalled.elapsed() < Duration::from_secs(10),
@@ -679,11 +730,9 @@ mod wire {
         );
     }
     #[tokio::test]
-    async fn serve_hidden_flag_skips_checkpoint_remote_and_private_repository() {
+    async fn disabled_checkpoints_skip_checkpoint_remote_and_private_repository() {
         let l = prepare_launch("git_task_repo").await;
-        let child =
-            spawn_executor_with_args(&l.path, &l.base_url, 10, 1, &["--no-workspace-checkpoints"])
-                .await;
+        let child = spawn_executor_with(&l.path, &l.base_url, 10, 1, true).await;
         let output = result(child).await;
         completed(&output);
         assert_eq!(
@@ -704,37 +753,35 @@ mod wire {
         command_timeout: u64,
         owner_epoch: i64,
     ) -> tokio::process::Child {
-        spawn_executor_with_args(path, base_url, command_timeout, owner_epoch, &[]).await
+        spawn_executor_with(path, base_url, command_timeout, owner_epoch, false).await
     }
-    async fn spawn_executor_with_args(
+    async fn spawn_executor_with(
         path: &std::path::Path,
         base_url: &str,
         command_timeout: u64,
         owner_epoch: i64,
-        extra: &[&str],
+        skip_checkpoints: bool,
     ) -> tokio::process::Child {
         let bootstrap = json!({"project_id":"project","session_id":"session","attachment_id":"attachment","owner_epoch":owner_epoch,"workspace_generation":"generation","journal_id":"journal","credential_id":"credential",
             "token":"restricted-executor-secret","workspace_provenance":{"kind":"existing_directory","identity":"original"},"workspace":path.join("workspace"),"state_dir":path.join("state"),"command_timeout_seconds":command_timeout});
-        let mut child = tokio::process::Command::new(
-            std::env::var("SIKARU_TEST_INSTALLED")
-                .unwrap_or_else(|_| env!("CARGO_BIN_EXE_sikaru").to_owned()),
-        )
-        .args([
-            "compute",
-            "serve",
-            "--bootstrap",
-            "-",
-            "--base-url",
-            base_url,
-        ])
-        .args(extra)
-        .env("SIKARU_API_KEY", "controller-secret")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap();
+        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "in_process_executor_child",
+                "--nocapture",
+                "--test-threads=1",
+                "-q",
+            ])
+            .env(super::CHILD_BASE_URL, base_url)
+            .env("SIKARU_API_KEY", "controller-secret")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        if skip_checkpoints {
+            command.env(super::CHILD_SKIP_CHECKPOINTS, "1");
+        }
+        let mut child = command.spawn().unwrap();
         child
             .stdin
             .take()
@@ -745,10 +792,18 @@ mod wire {
         child
     }
     async fn result(child: tokio::process::Child) -> std::process::Output {
-        tokio::time::timeout(Duration::from_secs(30), child.wait_with_output())
+        tokio::time::timeout(Duration::from_secs(30), served(child))
             .await
             .unwrap()
-            .unwrap()
+    }
+    /// The child's output, its stdout reduced to the result line the executor printed after the
+    /// test harness banner.
+    async fn served(child: tokio::process::Child) -> std::process::Output {
+        let mut output = child.wait_with_output().await.unwrap();
+        let printed = String::from_utf8_lossy(&output.stdout).into_owned();
+        let last = printed.lines().rev().find(|line| !line.trim().is_empty());
+        output.stdout = last.unwrap_or_default().as_bytes().to_vec();
+        output
     }
     #[tokio::test]
     async fn generated_transport_receipt_replay_and_native_payloads() {
@@ -1374,9 +1429,8 @@ mod wire {
     #[tokio::test]
     async fn long_command_is_answered_once_and_its_receipt_follows_exit_promptly() {
         let (root, _server, oracle, child) = launch("channel_long").await;
-        let output = tokio::time::timeout(Duration::from_secs(60), child.wait_with_output())
+        let output = tokio::time::timeout(Duration::from_secs(60), served(child))
             .await
-            .unwrap()
             .unwrap();
         completed(&output);
         let s = oracle.state.lock().unwrap();

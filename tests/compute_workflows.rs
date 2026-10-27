@@ -1,11 +1,11 @@
 use std::process::Command;
 #[test]
-fn primary_binary_has_fresh_exec_and_explicit_resume() {
+fn primary_binary_runs_agents_locally_with_explicit_resume() {
     let out = Command::new(
         std::env::var("SIKARU_TEST_INSTALLED")
             .unwrap_or_else(|_| env!("CARGO_BIN_EXE_sikaru").to_owned()),
     )
-    .args(["exec", "--help"])
+    .args(["agent", "run", "--help"])
     .output()
     .unwrap();
     assert!(
@@ -15,6 +15,7 @@ fn primary_binary_has_fresh_exec_and_explicit_resume() {
     );
     let help = String::from_utf8_lossy(&out.stdout);
     assert!(help.contains("--workspace") && help.contains("--resume"));
+    assert!(help.contains("--compute") && !help.contains("--print"));
 }
 #[cfg(unix)]
 #[path = "support/git_remote.rs"]
@@ -310,7 +311,10 @@ mod workflow {
             .args([
                 "--base-url",
                 &server.uri(),
-                "exec",
+                "agent",
+                "run",
+                "--compute",
+                "local",
                 "--project",
                 "project",
                 "--workspace",
@@ -368,7 +372,10 @@ mod workflow {
             .args([
                 "--base-url",
                 &server.uri(),
-                "exec",
+                "agent",
+                "run",
+                "--compute",
+                "local",
                 "--project",
                 "project",
                 "--workspace",
@@ -389,13 +396,7 @@ mod workflow {
         let output = launch_output(
             &server,
             &workspace,
-            &[
-                "--agent",
-                "agent",
-                "--prompt",
-                "write",
-                "--no-workspace-checkpoints",
-            ],
+            &["agent", "--prompt", "write", "--no-workspace-checkpoints"],
         )
         .await;
         assert!(
@@ -441,29 +442,19 @@ mod workflow {
     }
     #[test]
     fn hidden_flag_is_absent_from_help() {
-        for args in [&["exec", "--help"][..], &["compute", "serve", "--help"][..]] {
-            let out = std::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(out.status.success());
-            assert!(
-                !String::from_utf8_lossy(&out.stdout).contains("no-workspace-checkpoints"),
-                "{args:?}"
-            );
-        }
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
+            .args(["agent", "run", "--help"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("no-workspace-checkpoints"));
     }
 
     #[tokio::test]
-    async fn exec_records_one_checkpoint_before_cleanup_and_revocation() {
+    async fn local_run_records_one_checkpoint_before_cleanup_and_revocation() {
         let (server, state, dir, git) = setup_with_remote("completed").await;
         let workspace = dir.path().canonicalize().unwrap();
-        let output = launch_output(
-            &server,
-            &workspace,
-            &["--agent", "agent", "--prompt", "write"],
-        )
-        .await;
+        let output = launch_output(&server, &workspace, &["agent", "--prompt", "write"]).await;
         assert!(
             output.status.success(),
             "{}",
@@ -502,7 +493,7 @@ mod workflow {
     #[tokio::test]
     async fn missing_prompt_fails_before_creating_state_or_remote_session() {
         let (server, state, dir) = setup("completed").await;
-        let (code, result) = launch(&server, dir.path(), &["--agent", "agent"]).await;
+        let (code, result) = launch(&server, dir.path(), &["agent"]).await;
         assert_eq!(code, 1);
         assert_eq!(result["reason"], "invalid_input");
         assert_eq!(state.lock().unwrap().sessions, 0);
@@ -510,18 +501,21 @@ mod workflow {
     }
 
     #[tokio::test]
-    async fn positional_prompt_and_environment_defaults_complete_in_current_directory() {
+    async fn positional_agent_and_task_with_environment_project_complete_in_current_directory() {
         let (server, state, dir) = setup("completed").await;
         let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
             .current_dir(dir.path())
             .env("SIKARU_API_KEY", "controller-secret")
             .env("SIKARU_PROJECT", "project")
-            .env("SIKARU_AGENT", "agent")
             .args([
                 "--base-url",
                 &server.uri(),
-                "exec",
-                "--model",
+                "agent",
+                "run",
+                "agent",
+                "--compute",
+                "local",
+                "-m",
                 "kimi-k3",
                 "Write output",
             ])
@@ -549,7 +543,7 @@ mod workflow {
         let (code, result) = launch(
             &server,
             dir.path(),
-            &["--agent", "agent", "--model", "kimi-k3", "--prompt", "task"],
+            &["agent", "--model", "kimi-k3", "--prompt", "task"],
         )
         .await;
         assert_eq!(code, 0, "{result}");
@@ -557,6 +551,7 @@ mod workflow {
             &server,
             dir.path(),
             &[
+                "agent",
                 "--resume",
                 result["state_dir"].as_str().unwrap(),
                 "--model",
@@ -574,12 +569,7 @@ mod workflow {
     async fn unavailable_release_is_definite_no_start_but_other_conflicts_are_uncertain() {
         for scenario in ["release", "conflict"] {
             let (server, state, dir) = setup(scenario).await;
-            let (_, result) = launch(
-                &server,
-                dir.path(),
-                &["--agent", "agent", "--prompt", "task"],
-            )
-            .await;
+            let (_, result) = launch(&server, dir.path(), &["agent", "--prompt", "task"]).await;
             assert_eq!(state.lock().unwrap().sessions, 0);
             assert_eq!(state.lock().unwrap().environments, 0);
             assert!(result["state_dir"].is_string());
@@ -599,12 +589,7 @@ mod workflow {
     #[tokio::test]
     async fn billing_failure_provides_advice_without_exposing_response_body() {
         let (server, _, dir) = setup("billing").await;
-        let (code, result) = launch(
-            &server,
-            dir.path(),
-            &["--agent", "agent", "--prompt", "task"],
-        )
-        .await;
+        let (code, result) = launch(&server, dir.path(), &["agent", "--prompt", "task"]).await;
         assert_eq!(code, 4);
         assert!(
             result["help"].as_str().unwrap().contains("subscription"),
@@ -623,12 +608,14 @@ mod workflow {
             .args([
                 "--base-url",
                 &server.uri(),
-                "exec",
-                "--project",
-                "project",
-                "--agent",
                 "agent",
-                "--workspace",
+                "run",
+                "agent",
+                "--compute",
+                "local",
+                "-p",
+                "project",
+                "-C",
                 dir.path().to_str().unwrap(),
                 "-",
             ])
@@ -653,11 +640,13 @@ mod workflow {
         assert_eq!(state.lock().unwrap().turns, 1);
         let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_sikaru"))
             .args([
-                "exec",
+                "agent",
+                "run",
+                "agent",
+                "--compute",
+                "local",
                 "--project",
                 "project",
-                "--agent",
-                "agent",
                 "task",
                 "--prompt",
                 "other",
@@ -669,21 +658,25 @@ mod workflow {
     }
 
     #[tokio::test]
-    async fn terminal_exec_continues_one_session_for_two_turns() {
-        terminal_task("exec", false).await;
+    async fn terminal_without_task_continues_one_session_for_two_turns() {
+        terminal_task(&[]).await;
     }
 
     #[tokio::test]
-    async fn chat_alias_continues_the_same_session() {
-        terminal_task("chat", false).await;
+    async fn terminal_task_runs_once_and_exits() {
+        terminal_task(&["first task"]).await;
     }
 
     #[tokio::test]
-    async fn terminal_print_exits_after_one_task() {
-        terminal_task("exec", true).await;
+    async fn terminal_json_format_runs_once_with_machine_progress() {
+        terminal_task(&["--format", "json", "first task"]).await;
     }
 
-    async fn terminal_task(command: &str, print: bool) {
+    /// A terminal without a task opens a conversation; a task runs once; `--format json` also
+    /// keeps progress machine-readable.
+    async fn terminal_task(one_shot: &[&str]) {
+        let conversation = one_shot.is_empty();
+        let json_format = one_shot.contains(&"json");
         use std::io::Write;
         use std::os::fd::FromRawFd;
         let (server, state, dir) = setup("completedresume").await;
@@ -707,27 +700,25 @@ mod workflow {
             .args([
                 "--base-url",
                 &server.uri(),
-                command,
+                "agent",
+                "run",
+                "agent",
+                "--compute",
+                "local",
                 "--model",
                 "kimi-k3",
                 "--project",
                 "project",
-                "--agent",
-                "agent",
                 "--workspace",
                 dir.path().to_str().unwrap(),
             ])
-            .args(if print {
-                vec!["--print", "first task"]
-            } else {
-                vec![]
-            })
+            .args(one_shot)
             .stdin(terminal)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
             .unwrap();
-        if !print {
+        if conversation {
             input
                 .write_all(b"first task\nsecond task\n/exit\n")
                 .unwrap();
@@ -742,24 +733,28 @@ mod workflow {
             String::from_utf8_lossy(&output.stderr)
         );
         let progress = String::from_utf8_lossy(&output.stderr);
-        if print {
-            assert!(!progress.contains("You>"));
-            assert!(progress.contains("turn_submitted"));
-        } else {
-            assert!(progress.contains("You>"));
-            assert!(progress.contains("Working…"));
+        assert_eq!(progress.contains("You>"), conversation, "{progress}");
+        assert_eq!(
+            progress.contains("turn_submitted"),
+            json_format,
+            "{progress}"
+        );
+        assert_eq!(progress.contains("Working…"), !json_format, "{progress}");
+        if conversation {
             assert!(progress.contains("Tokens: 100 input (20 cached), 10 output."));
-            assert!(!progress.contains("turn_submitted"));
         }
         assert_eq!(state.lock().unwrap().sessions, 1);
         assert_eq!(state.lock().unwrap().models, vec![json!("kimi-k3")]);
-        assert_eq!(state.lock().unwrap().turns, if print { 1 } else { 2 });
+        assert_eq!(
+            state.lock().unwrap().turns,
+            if conversation { 2 } else { 1 }
+        );
         assert_eq!(
             std::fs::read_to_string(dir.path().join("output.txt")).unwrap(),
-            if print {
-                "native effect"
-            } else {
+            if conversation {
                 "second effect"
+            } else {
+                "native effect"
             }
         );
         let result: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -776,7 +771,7 @@ mod workflow {
         let (code, result) = launch(
             &server,
             dir.path(),
-            &["--agent", "agent", "--prompt", "task", "--dry-run"],
+            &["agent", "--prompt", "task", "--dry-run"],
         )
         .await;
         assert_eq!(code, 0);
@@ -850,7 +845,7 @@ mod workflow {
         assert!(!output.status.success());
         let result: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(result["checks"][1]["ok"], false);
-        assert!(result.to_string().contains("auth login"), "{result}");
+        assert!(result.to_string().contains("sikaru login"), "{result}");
         assert!(!result.to_string().contains("secret-provider-token"));
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
@@ -868,11 +863,13 @@ mod workflow {
         .args([
             "--base-url",
             &server.uri(),
-            "exec",
+            "agent",
+            "run",
+            "agent",
+            "--compute",
+            "local",
             "--project",
             "project",
-            "--agent",
-            "agent",
             "--workspace",
             workspace.to_str().unwrap(),
             "--prompt",
@@ -916,12 +913,8 @@ mod workflow {
         let (server, state, dir) = setup("normal").await;
         let workspace = dir.path().canonicalize().unwrap();
         std::fs::write(workspace.join("keep"), "original").unwrap();
-        let (code, first) = launch(
-            &server,
-            &workspace,
-            &["--agent", "agent", "--prompt", "write output"],
-        )
-        .await;
+        let (code, first) =
+            launch(&server, &workspace, &["agent", "--prompt", "write output"]).await;
         assert_eq!(code, 0, "{first}");
         assert_eq!(
             std::fs::read_to_string(workspace.join("output.txt")).unwrap(),
@@ -933,12 +926,8 @@ mod workflow {
             first["events"]["events"][0]["payload"]["output"],
             "wrote output"
         );
-        let (code, second) = launch(
-            &server,
-            &workspace,
-            &["--agent", "agent", "--prompt", "write again"],
-        )
-        .await;
+        let (code, second) =
+            launch(&server, &workspace, &["agent", "--prompt", "write again"]).await;
         assert_eq!(code, 0, "{second}");
         assert_ne!(first["session_id"], second["session_id"]);
         assert_ne!(first["state_dir"], second["state_dir"]);
@@ -955,10 +944,11 @@ mod workflow {
         let (code, result) = launch(
             &server,
             &workspace,
-            &["--agent", "agent", "--prompt", "write"],
+            &["agent", "--prompt", "write", "--format", "json"],
         )
         .await;
         assert_eq!(code, 2, "{result}");
+        assert_eq!(result["status"], "approval_required");
         assert_eq!(result["cleanup"], "confirmed");
         assert!(!workspace.join("output.txt").exists());
         let (server, _, dir) = setup("late").await;
@@ -966,14 +956,7 @@ mod workflow {
         let (code, result) = launch(
             &server,
             &workspace,
-            &[
-                "--agent",
-                "agent",
-                "--prompt",
-                "write",
-                "--approval-wait",
-                "2",
-            ],
+            &["agent", "--prompt", "write", "--approval-wait", "2"],
         )
         .await;
         assert_eq!(code, 0, "{result}");
@@ -986,7 +969,6 @@ mod workflow {
             &server,
             &dir.path().canonicalize().unwrap(),
             &[
-                "--agent",
                 "agent",
                 "--prompt",
                 "work",
@@ -1008,17 +990,12 @@ mod workflow {
     async fn explicit_resume_rejects_replaced_workspace_before_new_claim() {
         let (server, state, dir) = setup("approval").await;
         let workspace = dir.path().canonicalize().unwrap();
-        let (_, result) = launch(
-            &server,
-            &workspace,
-            &["--agent", "agent", "--prompt", "write"],
-        )
-        .await;
+        let (_, result) = launch(&server, &workspace, &["agent", "--prompt", "write"]).await;
         let other = tempfile::tempdir().unwrap();
         let (code, _) = launch(
             &server,
             &other.path().canonicalize().unwrap(),
-            &["--resume", result["state_dir"].as_str().unwrap()],
+            &["agent", "--resume", result["state_dir"].as_str().unwrap()],
         )
         .await;
         assert_eq!(code, 4);
@@ -1030,7 +1007,7 @@ mod workflow {
         let (code, result) = launch(
             &server,
             &dir.path().canonicalize().unwrap(),
-            &["--agent", "agent", "--prompt", "write"],
+            &["agent", "--prompt", "write"],
         )
         .await;
         assert_eq!(code, 4, "{result}");
@@ -1041,17 +1018,12 @@ mod workflow {
     async fn resume_observes_original_parked_run_with_new_claim_and_original_journal() {
         let (server, state, dir) = setup("approval").await;
         let workspace = dir.path().canonicalize().unwrap();
-        let (code, parked) = launch(
-            &server,
-            &workspace,
-            &["--agent", "agent", "--prompt", "write"],
-        )
-        .await;
+        let (code, parked) = launch(&server, &workspace, &["agent", "--prompt", "write"]).await;
         assert_eq!(code, 2);
         let (code, resumed) = launch(
             &server,
             &workspace,
-            &["--resume", parked["state_dir"].as_str().unwrap()],
+            &["agent", "--resume", parked["state_dir"].as_str().unwrap()],
         )
         .await;
         assert_eq!(code, 0, "{resumed}");
@@ -1075,7 +1047,7 @@ mod workflow {
             let (code, result) = launch(
                 &server,
                 &dir.path().canonicalize().unwrap(),
-                &["--agent", "agent", "--prompt", "work", "--timeout", "1"],
+                &["agent", "--prompt", "work", "--timeout", "1"],
             )
             .await;
             assert_eq!(code, expected, "{result}");
@@ -1096,18 +1068,14 @@ mod workflow {
     async fn interrupted_setup_resumes_idempotently_without_losing_session_identity() {
         let (server, state, dir) = setup("partialsetup").await;
         let workspace = dir.path().canonicalize().unwrap();
-        let (code, failed) = launch(
-            &server,
-            &workspace,
-            &["--agent", "agent", "--prompt", "write"],
-        )
-        .await;
+        let (code, failed) = launch(&server, &workspace, &["agent", "--prompt", "write"]).await;
         assert_eq!(code, 4);
         assert_eq!(state.lock().unwrap().sessions, 1);
         let (code, resumed) = launch(
             &server,
             &workspace,
             &[
+                "agent",
                 "--resume",
                 failed["state_dir"].as_str().unwrap(),
                 "--prompt",
@@ -1124,17 +1092,13 @@ mod workflow {
     async fn new_prompt_on_resume_cannot_finish_using_previous_turn() {
         let (server, state, dir) = setup("completedresume").await;
         let workspace = dir.path().canonicalize().unwrap();
-        let (code, first) = launch(
-            &server,
-            &workspace,
-            &["--agent", "agent", "--prompt", "first"],
-        )
-        .await;
+        let (code, first) = launch(&server, &workspace, &["agent", "--prompt", "first"]).await;
         assert_eq!(code, 0, "{first}");
         let (code, second) = launch(
             &server,
             &workspace,
             &[
+                "agent",
                 "--resume",
                 first["state_dir"].as_str().unwrap(),
                 "--prompt",
@@ -1155,7 +1119,7 @@ mod workflow {
 #[test]
 fn run_inspection_is_not_advertised_in_help() {
     let binary = env!("CARGO_BIN_EXE_sikaru");
-    for args in [vec!["--help"], vec!["runs", "--help"]] {
+    for args in [vec!["--help"], vec!["agent", "runs", "--help"]] {
         let result = Command::new(binary).args(args).output().unwrap();
         assert!(result.status.success());
         assert!(!String::from_utf8_lossy(&result.stdout).contains("inspect-run"));

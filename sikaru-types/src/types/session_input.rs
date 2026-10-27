@@ -23,7 +23,7 @@ pub struct SessionInput {
     pub final_output_schema: Option<HashMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
-    /// Default model for this session. Use a Sikaru model catalog ID, such as kimi-k3. Omit to inherit the project default.
+    /// Default model for this session. Use a Sikaru model catalog ID, such as moonshotai/kimi-k3. Omit to inherit the project default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// Optional previously serving release generation. Omit to follow promotions.

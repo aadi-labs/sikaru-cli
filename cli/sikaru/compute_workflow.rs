@@ -30,33 +30,38 @@ struct Saved {
     executor_started: bool,
     turn_key: Option<String>,
 }
+/// `sikaru agent run`: managed by default; `--compute local` serves the attachment here.
 pub fn command() -> clap::Command {
-    clap::Command::new("exec")
-        .alias("chat")
-        .about("Work with an agent conversationally; use --print for a single JSON result")
-        .after_help("In a terminal, each message continues the same session. Commands: /help, /status, /exit.\nPiped input and --print run one task and exit. Local commands run with your OS permissions.")
-        .arg(clap::Arg::new("print").long("print").short('p').action(clap::ArgAction::SetTrue)
-            .help("Run one task, emit its JSON result, and exit"))
-        .arg(clap::Arg::new("model").long("model").short('m')
-            .help("Session default model, e.g. kimi-k3; omitted uses the project default"))
-        .arg(
-            clap::Arg::new("project")
-                .long("project")
-                .env("SIKARU_PROJECT")
-                .required(true),
-        )
+    clap::Command::new("run")
+        .about("Run an agent: one task, or a conversation when no task is given")
+        .after_help("Runs on Sikaru by default. With --compute local, tools run in your workspace with your OS permissions.\nIn a terminal without a task, each message continues the same session. Commands: /help, /status, /exit.\nPiped input and --format json run one task and print one JSON result.")
         .arg(
             clap::Arg::new("agent")
-                .long("agent")
-                .env("SIKARU_AGENT")
-                .required_unless_present("resume"),
+                .required(true)
+                .help("Agent slug; a resumed session must name its original agent"),
         )
+        .arg(
+            clap::Arg::new("task")
+                .value_name("TASK")
+                .help("Task to run, or - to read stdin"),
+        )
+        .arg(
+            clap::Arg::new("compute")
+                .long("compute")
+                .value_parser(["managed", "local"])
+                .default_value("managed")
+                .help("Where tools run: managed on Sikaru, or local in your workspace"),
+        )
+        .arg(super::super::agent::project())
+        .arg(clap::Arg::new("model").long("model").short('m')
+            .help("Session default model, e.g. moonshotai/kimi-k3; omitted uses the project default"))
         .arg(
             clap::Arg::new("workspace")
                 .long("workspace")
                 .visible_alias("cd")
                 .short('C')
-                .default_value("."),
+                .default_value(".")
+                .help("Local workspace (--compute local)"),
         )
         .arg(
             clap::Arg::new("prompt")
@@ -70,14 +75,9 @@ pub fn command() -> clap::Command {
                 .help("UTF-8 task file, or - for stdin"),
         )
         .arg(
-            clap::Arg::new("task")
-                .value_name("PROMPT")
-                .help("Task to run, or - to read stdin"),
-        )
-        .arg(
             clap::Arg::new("resume")
                 .long("resume")
-                .help("Existing state directory; never replaces the workspace"),
+                .help("Local session state directory to continue; never replaces the workspace"),
         )
         .arg(
             clap::Arg::new("state-dir")
@@ -109,6 +109,19 @@ pub fn command() -> clap::Command {
                 .hide(true),
         )
 }
+/// `--dry-run` validates input only; it never reads remote readiness or a resume journal.
+pub fn dry_run(m: &clap::ArgMatches, workspace: Option<&std::path::Path>) -> Option<Value> {
+    if m.try_get_one::<bool>("dry-run").ok().flatten() != Some(&true) {
+        return None;
+    }
+    Some(
+        json!({"status":"completed","dry_run":true,"compute":m.get_one::<String>("compute"),
+        "workspace":workspace,"project":m.get_one::<String>("project"),
+        "agent":m.get_one::<String>("agent"),"model":m.get_one::<String>("model"),
+        "resume":m.get_one::<String>("resume"),"cleanup":"not_started",
+        "usage":{"available":false},"scope":"Input validation only; does not verify remote readiness or resume journal."}),
+    )
+}
 pub async fn execute(
     m: &clap::ArgMatches,
     ctx: &fern_cli_sdk::openapi::AppContext,
@@ -121,14 +134,8 @@ pub async fn execute(
                 "Workspace does not exist or cannot be read. Use --workspace PATH.",
             )
         })?;
-    if m.try_get_one::<bool>("dry-run").ok().flatten() == Some(&true) {
-        return Ok(
-            json!({"status":"completed","dry_run":true,"workspace":workspace,
-            "project":m.get_one::<String>("project"),"agent":m.get_one::<String>("agent"),
-            "model":m.get_one::<String>("model"),
-            "resume":m.get_one::<String>("resume"),"cleanup":"not_started",
-            "usage":{"available":false},"scope":"Input validation only; does not verify remote readiness or resume journal."}),
-        );
+    if let Some(validated) = dry_run(m, Some(&workspace)) {
+        return Ok(validated);
     }
     super::doctor::require_shell()?;
     let (mut saved, path) = open_state(m, &workspace)?;
@@ -302,7 +309,11 @@ async fn execute_saved(
     let credential_id = bootstrap.credential_id.clone();
     let mut result = run_attached(m, ctx, c, s, &a, path, text, bootstrap).await?;
     revoke_after_cleanup(c, s, &credential_id, &mut result).await;
-    enrich(c, s, &mut result).await;
+    let run = result["execution"]["run_id"]
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| s.value.run_id.clone());
+    enrich(c, &s.value.project, run, &mut result).await;
     Ok(result)
 }
 async fn acquire_claim(
@@ -520,17 +531,14 @@ async fn wait_ready(
     Ok(())
 }
 
-async fn enrich(c: &ApiClient, s: &State<Saved>, result: &mut Value) {
+/// Adds the run's record, usage and final output to a task result.
+pub async fn enrich(c: &ApiClient, project: &str, run: Option<String>, result: &mut Value) {
     result["result"] = Value::Null;
-    let run = result["execution"]["run_id"]
-        .as_str()
-        .map(str::to_owned)
-        .or_else(|| s.value.run_id.clone());
     let Some(run) = run else {
         return;
     };
     result["run_id"] = json!(run);
-    if let Ok(value) = call(c.runs.get(&s.value.project, &run, None)).await {
+    if let Ok(value) = call(c.runs.get(project, &run, None)).await {
         result["result"] = json!(value);
         if value.usage_summary.is_some() || value.cost_summary.is_some() {
             result["usage"] =
@@ -538,11 +546,8 @@ async fn enrich(c: &ApiClient, s: &State<Saved>, result: &mut Value) {
         }
     }
     result["final_output"] = json!({"available":false});
-    let fetched = tokio::time::timeout(
-        Duration::from_secs(30),
-        product_output(c, &s.value.project, &run),
-    )
-    .await;
+    let fetched =
+        tokio::time::timeout(Duration::from_secs(30), product_output(c, project, &run)).await;
     if let Ok(Ok((output, events))) = fetched {
         result["final_output"] = output;
         result["events"] = events;

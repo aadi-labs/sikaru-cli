@@ -20,6 +20,7 @@ async fn mutation_endpoint_is_not_replayed_even_with_an_idempotency_header() {
     let output = tokio::task::spawn_blocking(move || {
         Command::new(env!("CARGO_BIN_EXE_sikaru"))
             .args([
+                "agent",
                 "workflows",
                 "start_project_workflow_run",
                 "--project-id",

@@ -15,7 +15,7 @@ pub struct ClaimView {
     pub owner_epoch: i64,
     #[serde(default)]
     pub owner_id: String,
-    /// Initial launch bound anchored at the first claim request start; idempotent claim retries never restart this clock. Workers cannot renew a ready executor lease.
+    /// Initial launch bound anchored at the first claim request start; idempotent claim retries never restart this clock. The claiming controller cannot renew a ready executor lease.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub startup_ttl_seconds: Option<i64>,
     #[serde(default)]

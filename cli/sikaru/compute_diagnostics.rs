@@ -15,8 +15,7 @@ pub async fn session_admission<T>(
         .map_err(|_| anyhow::Error::new(TransportFailure::Transient))?
         .map_err(|error| match &error {
             sikaru_sdk::ApiError::ConflictError {
-                code: Some(code),
-                ..
+                code: Some(code), ..
             } if code == "release_unavailable" => anyhow::Error::new(UnavailableRelease),
             sikaru_sdk::ApiError::Http {
                 status: 409,
@@ -51,10 +50,10 @@ pub fn failure(error: &anyhow::Error, reason: &str) -> Value {
 
 fn advice(error: &anyhow::Error) -> &'static str {
     match error.downcast_ref::<TransportFailure>() {
-        Some(TransportFailure::Rejected(401)) => "Authentication failed. Run sikaru auth login, then resume the saved state directory.",
+        Some(TransportFailure::Rejected(401)) => "Authentication failed. Run sikaru login, then resume the saved state directory.",
         Some(TransportFailure::Rejected(402)) => "Billing blocked this request. Check the team's subscription and available budget, then resume the saved state directory.",
         Some(TransportFailure::Rejected(403)) => "Access denied. Check that your API key has access to this project and the required scopes.",
-        Some(TransportFailure::Rejected(404)) => "Resource not found. Check --project and --agent, or your saved session's availability.",
+        Some(TransportFailure::Rejected(404)) => "Resource not found. Check --project and the agent, or your saved session's availability.",
         Some(TransportFailure::Transient) => "The service could not be reached or is temporarily unavailable. Check connectivity and service status; preserve the state directory for explicit resume.",
         _ => "Preserve the original workspace and state directory. Inspect the saved run before resuming; do not start a replacement run to retry an uncertain action.",
     }

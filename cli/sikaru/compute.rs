@@ -28,139 +28,41 @@ pub mod doctor;
 #[path = "compute_input.rs"]
 pub mod input;
 #[cfg(unix)]
-#[path = "compute_launcher.rs"]
-pub mod launcher;
-#[cfg(unix)]
 #[path = "compute_state.rs"]
 pub mod state;
-#[cfg(unix)]
-#[path = "compute_worker.rs"]
-pub mod worker;
 #[cfg(unix)]
 #[path = "compute_workflow.rs"]
 pub mod workflow;
 
 pub fn install(app: CliApp) -> CliApp {
     #[cfg(unix)]
-    {
-        return app
-            .command(
-                inspection_command(),
-                OpenApiBinding::handler(|m, ctx| {
-                    let result = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(inspect_run(m, ctx))
-                    })
-                    .map_err(inspection_error)?;
-                    println!("{}", result);
-                    Ok(())
-                }),
-            )
-            .command(
-                doctor::command(),
-                OpenApiBinding::handler(|m, ctx| {
-                    let result = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(doctor::execute(m, ctx))
-                    });
-                    emit(Ok(result));
-                    Ok(())
-                }),
-            )
-            .command(
-                workflow::command(),
-                OpenApiBinding::handler(|m, ctx| {
-                    let interactive = chat::is_interactive(m);
-                    let result = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(async {
-                            if interactive {
-                                chat::execute(m, ctx).await
-                            } else {
-                                workflow::execute(m, ctx).await
-                            }
-                        })
-                    });
-                    emit_task(result, interactive);
-                    Ok(())
-                }),
-            )
-            .command(
-                clap::Command::new("compute")
-                    .about("Run admitted task IO on customer compute")
-                    .subcommand(
-                        clap::Command::new("serve")
-                            .about("Serve one restricted attachment (Unix)")
-                            .arg(
-                                clap::Arg::new("bootstrap")
-                                    .long("bootstrap")
-                                    .required(true)
-                                    .help("Private bootstrap JSON file, or - for stdin"),
-                            )
-                            .arg(
-                                clap::Arg::new("no-workspace-checkpoints")
-                                    .long("no-workspace-checkpoints")
-                                    .action(clap::ArgAction::SetTrue)
-                                    .hide(true),
-                            ),
-                    )
-                    .subcommand(worker::command()),
-                OpenApiBinding::handler(|m, ctx| {
-                    let result = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(execute(m, ctx))
-                    });
-                    emit(result);
-                    Ok(())
-                }),
-            );
-    }
-    #[cfg(not(unix))]
-    {
-        app.command(
-            clap::Command::new("compute").about("Native compute requires macOS or Linux"),
-            OpenApiBinding::handler(|_, _| {
-                Err(fern_cli_sdk::error::CliError::Validation(
-                    "native executor requires Unix".into(),
-                ))
+    let app = app
+        .command(
+            inspection_command(),
+            OpenApiBinding::handler(|m, ctx| {
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(inspect_run(m, ctx))
+                })
+                .map_err(inspection_error)?;
+                println!("{}", result);
+                Ok(())
             }),
         )
-    }
+        .command(
+            doctor::command(),
+            OpenApiBinding::handler(|m, ctx| {
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(doctor::execute(m, ctx))
+                });
+                emit(Ok(result));
+                Ok(())
+            }),
+        );
+    app
 }
+/// Prints one JSON result and exits with its outcome code.
 #[cfg(unix)]
-async fn execute(
-    m: &clap::ArgMatches,
-    ctx: &fern_cli_sdk::openapi::AppContext,
-) -> anyhow::Result<serde_json::Value> {
-    match m.subcommand() {
-        Some(("serve", options)) => {
-            runtime::serve_with_options(
-                config::Bootstrap::read(options.get_one::<String>("bootstrap").unwrap())?,
-                ctx.effective_base_url(),
-                transport::HttpIdentity::from_config(ctx.http_config())?,
-                runtime::RunOptions {
-                    skip_checkpoints: options.get_flag("no-workspace-checkpoints"),
-                    ..Default::default()
-                },
-            )
-            .await
-        }
-        Some(("worker", options)) => worker::execute(options, ctx).await,
-        _ => anyhow::bail!("choose compute serve or worker"),
-    }
-}
-#[cfg(unix)]
-fn emit_task(result: anyhow::Result<serde_json::Value>, interactive: bool) {
-    use std::io::IsTerminal;
-    if !interactive || !std::io::stdout().is_terminal() {
-        emit(result);
-        return;
-    }
-    let result =
-        result.unwrap_or_else(|error| diagnostics::failure(&error, "controller_or_resume_failed"));
-    if exit_code(&result) != 0 {
-        chat::render(&result);
-        std::process::exit(exit_code(&result));
-    }
-}
-#[cfg(unix)]
-fn emit(result: anyhow::Result<serde_json::Value>) {
+pub fn emit(result: anyhow::Result<serde_json::Value>) {
     let result = result
         .unwrap_or_else(|error| diagnostics::failure(&error, "bootstrap_or_journal_rejected"));
     println!("{}", result);
@@ -171,13 +73,14 @@ fn emit(result: anyhow::Result<serde_json::Value>) {
         std::process::exit(code);
     }
 }
-/// Stable native headless outcomes, shared with controller/worker composition.
+/// Stable native headless outcomes.
 pub fn exit_code(result: &serde_json::Value) -> i32 {
     match result["status"].as_str() {
         Some("completed") => 0,
         Some("approval_required") => 2,
         Some("cancelled") => 3,
         Some("recovery_required") => 4,
+        Some("paused") => 5,
         _ => 1,
     }
 }

@@ -1,4 +1,5 @@
 //! A terminal conversation reuses the same durable hosted workflow for every turn.
+//! `--format json`, piped input and dry runs are never conversations.
 use super::{diagnostics, input, workflow};
 use anyhow::Result;
 use clap::ArgMatches;
@@ -6,22 +7,42 @@ use fern_cli_sdk::openapi::AppContext;
 use serde_json::{json, Value};
 use std::io::{IsTerminal, Write};
 
+/// A person at the terminal: progress is human text instead of JSON events.
 pub fn is_interactive(m: &ArgMatches) -> bool {
-    std::io::stdin().is_terminal()
-        && !m.get_flag("print")
-        && m.try_get_one::<bool>("dry-run").ok().flatten() != Some(&true)
+    std::io::stdin().is_terminal() && !json_format(m) && !dry_run(m)
+}
+
+/// Only an explicit `--format json`; the framework's piped-stdout default stays human here.
+fn json_format(m: &ArgMatches) -> bool {
+    m.try_get_one::<String>("format")
+        .ok()
+        .flatten()
+        .map(String::as_str)
+        == Some("json")
+}
+
+fn dry_run(m: &ArgMatches) -> bool {
+    m.try_get_one::<bool>("dry-run").ok().flatten() == Some(&true)
+}
+
+/// A conversation opens only for a person who gave no task.
+pub fn is_conversation(m: &ArgMatches) -> bool {
+    let task = ["task", "prompt", "prompt-file"]
+        .iter()
+        .any(|name| m.contains_id(name));
+    is_interactive(m) && !task
 }
 
 pub async fn execute(m: &ArgMatches, ctx: &AppContext) -> Result<Value> {
     if !std::io::stdin().is_terminal() {
         return Err(input::InvalidInput(
-            "Chat requires a terminal. Use sikaru exec - for piped tasks.",
+            "A conversation requires a terminal. Use sikaru agent run AGENT - for piped tasks.",
         )
         .into());
     }
-    if m.try_get_one::<bool>("dry-run").ok().flatten() == Some(&true) {
+    if dry_run(m) {
         return Err(input::InvalidInput(
-            "For a read-only preview, use sikaru exec --dry-run 'Your task'.",
+            "For a read-only preview, use sikaru agent run AGENT --dry-run 'Your task'.",
         )
         .into());
     }
@@ -45,7 +66,7 @@ pub async fn execute(m: &ArgMatches, ctx: &AppContext) -> Result<Value> {
     }
 }
 
-async fn next_task(initial: Option<String>, last: &Value) -> Result<Option<String>> {
+pub async fn next_task(initial: Option<String>, last: &Value) -> Result<Option<String>> {
     if let Some(text) = initial {
         return Ok(Some(text));
     }
@@ -84,8 +105,9 @@ async fn wait_for_input() -> bool {
 }
 
 fn turn_matches(m: &ArgMatches, resume: Option<&str>, text: &str) -> Result<ArgMatches> {
-    let mut args = vec!["exec".to_owned()];
-    for name in ["project", "agent", "workspace", "tenant", "user", "model"] {
+    let mut args = vec!["run".to_owned(), "--compute".into(), "local".into()];
+    args.extend(m.get_one::<String>("agent").cloned());
+    for name in ["project", "workspace", "tenant", "user", "model"] {
         if let Some(value) = m.get_one::<String>(name) {
             args.extend([format!("--{name}"), value.clone()]);
         }
@@ -155,18 +177,19 @@ mod tests {
     fn follow_up_turns_keep_the_checkpoint_switch() {
         let m = super::workflow::command()
             .try_get_matches_from([
-                "exec",
+                "run",
+                "a",
+                "--compute",
+                "local",
                 "--project",
                 "p",
-                "--agent",
-                "a",
                 "--no-workspace-checkpoints",
             ])
             .unwrap();
         let next = super::turn_matches(&m, Some("/state"), "next task").unwrap();
         assert!(next.get_flag("no-workspace-checkpoints"));
         let plain = super::workflow::command()
-            .try_get_matches_from(["exec", "--project", "p", "--agent", "a"])
+            .try_get_matches_from(["run", "a", "--compute", "local", "--project", "p"])
             .unwrap();
         assert!(!super::turn_matches(&plain, None, "task")
             .unwrap()

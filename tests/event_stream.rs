@@ -14,7 +14,7 @@ async fn streams_event_data_and_forwards_resume_cursor() {
         .expect(1).mount(&server).await;
     let url = server.uri();
     let output = tokio::task::spawn_blocking(move || Command::new(env!("CARGO_BIN_EXE_sikaru"))
-        .args(["runs", "stream_events", "--project-id", "p", "--run-id", "r", "--after", "1",
+        .args(["agent", "runs", "stream_events", "--project-id", "p", "--run-id", "r", "--after", "1",
             "--base-url", &url, "--format", "json"])
         .env("SIKARU_API_KEY", "test-only").output().unwrap()).await.unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
