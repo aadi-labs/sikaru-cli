@@ -20,12 +20,15 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http, Message};
 pub struct HttpIdentity {
     pub client: reqwest::Client,
     pub user_agent: String,
+    /// The CLI's scoped proxy override (`SIKARU_PROXY`), resolved by Fern like the REST client's.
+    pub proxy: Option<fern_cli_sdk::http::ResolvedProxy>,
 }
 impl HttpIdentity {
     pub fn from_config(config: &fern_cli_sdk::http::HttpConfig) -> Result<Self> {
         Ok(Self {
             client: config.build_client()?,
             user_agent: config.user_agent(),
+            proxy: config.resolve()?.proxy,
         })
     }
 }
@@ -35,6 +38,7 @@ pub struct Transport {
     channel_url: Result<String, String>,
     token: String,
     user_agent: String,
+    proxy: Option<fern_cli_sdk::http::ResolvedProxy>,
 }
 impl Transport {
     pub fn new(
@@ -56,6 +60,7 @@ impl Transport {
             channel_url,
             token: b.token.clone(),
             user_agent: http.user_agent,
+            proxy: http.proxy,
         }))
     }
     pub async fn status(&self, deadline: Instant) -> Result<AttachmentView> {
@@ -84,8 +89,10 @@ impl Transport {
         )
         .await
     }
-    pub async fn submit(&self, receipt: &ReceiptInput, deadline: Instant) -> Result<ReceiptView> {
-        bounded(
+    /// Deliver one receipt. A conflict is final: the service will never record this receipt
+    /// (for example a warm call that never parked), so delivery is settled, not retried.
+    pub async fn submit(&self, receipt: &ReceiptInput, deadline: Instant) -> Result<Submitted> {
+        let submitted = within(
             deadline,
             self.client.compute_operations.submit_receipt(
                 &self.binding.project_id,
@@ -94,7 +101,14 @@ impl Transport {
                 None,
             ),
         )
-        .await
+        .await?;
+        match submitted {
+            Ok(_) => Ok(Submitted::Recorded),
+            Err(ApiError::ConflictError { .. } | ApiError::Http { status: 409, .. }) => {
+                Ok(Submitted::Refused)
+            }
+            Err(error) => Err(classify(error)),
+        }
     }
     pub fn validate(&self, a: &AttachmentView) -> Result<()> {
         let b = &self.binding;
@@ -121,6 +135,7 @@ impl Transport {
                 ReadyInputCapabilitiesItem::ComputeExecute,
                 ReadyInputCapabilitiesItem::BashRun,
                 ReadyInputCapabilitiesItem::ConditionWaitsV1,
+                ReadyInputCapabilitiesItem::WorkspaceEditV1,
             ],
         }
     }
@@ -275,12 +290,23 @@ pub async fn bounded<T>(
     deadline: Instant,
     future: impl Future<Output = Result<T, ApiError>>,
 ) -> Result<T> {
-    let end = deadline.min(Instant::now() + Duration::from_secs(5));
     // Do not format ApiError: arbitrary error bodies may contain credentials.
+    within(deadline, future).await?.map_err(classify)
+}
+/// One call bounded by the deadline and 5 s; a timeout is transient.
+async fn within<T>(
+    deadline: Instant,
+    future: impl Future<Output = Result<T, ApiError>>,
+) -> Result<Result<T, ApiError>> {
+    let end = deadline.min(Instant::now() + Duration::from_secs(5));
     tokio::time::timeout_at(end, future)
         .await
-        .map_err(|_| anyhow::Error::new(TransportFailure::Transient))?
-        .map_err(classify)
+        .map_err(|_| anyhow::Error::new(TransportFailure::Transient))
+}
+/// The service's answer to a delivered receipt; both settle delivery.
+pub enum Submitted {
+    Recorded,
+    Refused,
 }
 fn renewal_deadline(start: Instant, a: &AttachmentView) -> Result<Instant> {
     let ttl = a
@@ -605,7 +631,9 @@ impl Transport {
         };
         let end = Instant::now() + CHANNEL_OPEN_TIMEOUT;
         let socket =
-            match tokio::time::timeout_at(end, tokio_tungstenite::connect_async(request)).await {
+            match tokio::time::timeout_at(end, connect_through_proxy(request, self.proxy.as_ref()))
+                .await
+            {
                 Ok(Ok((socket, _))) => socket,
                 Ok(Err(error)) => return Opened::Ended(refusal(&error)),
                 Err(_) => return Opened::Ended(ChannelEnd::Lost),
@@ -656,6 +684,120 @@ impl Transport {
         }
     }
 }
+type Connected = (
+    Socket,
+    tokio_tungstenite::tungstenite::handshake::client::Response,
+);
+
+/// The channel follows the REST client's proxy rule (Fern's `SIKARU_PROXY` override, then the
+/// standard variables reqwest honors), because Fern's WebSocket transport has no proxy support
+/// yet. An executor whose only egress is a proxy keeps the push channel instead of polling.
+async fn connect_through_proxy(
+    request: http::Request<()>,
+    scoped: Option<&fern_cli_sdk::http::ResolvedProxy>,
+) -> tokio_tungstenite::tungstenite::Result<Connected> {
+    let uri = request.uri().clone();
+    let host = uri.host().unwrap_or_default().to_owned();
+    let secure = uri.scheme_str() == Some("wss");
+    let Some(proxy) = proxy_for(&host, secure, scoped, |name| std::env::var(name).ok()) else {
+        return tokio_tungstenite::connect_async(request).await;
+    };
+    let port = uri.port_u16().unwrap_or(if secure { 443 } else { 80 });
+    let stream = tunnel(&proxy, &host, port).await?;
+    tokio_tungstenite::client_async_tls(request, stream).await
+}
+
+/// The proxy for `host`: Fern's scoped override, else the standard variables, unless its bypass
+/// list exempts it.
+fn proxy_for(
+    host: &str,
+    secure: bool,
+    scoped: Option<&fern_cli_sdk::http::ResolvedProxy>,
+    env: impl Fn(&str) -> Option<String>,
+) -> Option<http::Uri> {
+    let names: &[&str] = if secure {
+        &["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]
+    } else {
+        &["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"]
+    };
+    let (proxy, exempt) = match scoped {
+        Some(scoped) => (
+            scoped.url.clone(),
+            scoped.no_proxy.clone().unwrap_or_default(),
+        ),
+        None => (
+            names
+                .iter()
+                .find_map(|name| env(name).filter(|value| !value.is_empty()))?,
+            env("NO_PROXY")
+                .or_else(|| env("no_proxy"))
+                .unwrap_or_default(),
+        ),
+    };
+    let exempted = exempt.split(',').map(str::trim).any(|entry| {
+        let entry = entry.trim_start_matches('.');
+        entry == "*"
+            || (!entry.is_empty() && (host == entry || host.ends_with(&format!(".{entry}"))))
+    });
+    if exempted {
+        return None;
+    }
+    proxy.parse().ok()
+}
+
+/// Basic credentials from the proxy URL's userinfo, as HTTP clients send them.
+fn proxy_authorization(proxy: &http::Uri) -> Option<String> {
+    use base64::Engine;
+    let (userinfo, _) = proxy.authority()?.as_str().rsplit_once('@')?;
+    let decode = |part: &str| {
+        percent_encoding::percent_decode_str(part)
+            .decode_utf8_lossy()
+            .into_owned()
+    };
+    let (user, password) = userinfo.split_once(':').unwrap_or((userinfo, ""));
+    let credentials = format!("{}:{}", decode(user), decode(password));
+    Some(base64::engine::general_purpose::STANDARD.encode(credentials))
+}
+
+async fn tunnel(
+    proxy: &http::Uri,
+    host: &str,
+    port: u16,
+) -> tokio_tungstenite::tungstenite::Result<tokio::net::TcpStream> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let failed = |message: &str| {
+        tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(message.to_owned()))
+    };
+    if proxy.scheme_str() == Some("https") {
+        return Err(failed("TLS to the proxy itself is not supported"));
+    }
+    let proxy_host = proxy
+        .host()
+        .ok_or_else(|| failed("proxy URL has no host"))?;
+    let mut stream =
+        tokio::net::TcpStream::connect((proxy_host, proxy.port_u16().unwrap_or(80))).await?;
+    let mut connect = format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n");
+    if let Some(credentials) = proxy_authorization(proxy) {
+        connect.push_str(&format!("Proxy-Authorization: Basic {credentials}\r\n"));
+    }
+    connect.push_str("\r\n");
+    stream.write_all(connect.as_bytes()).await?;
+    // Nothing follows the response head until TLS starts, so reading it bytewise consumes no tunnel data.
+    let mut head = Vec::new();
+    while !head.ends_with(b"\r\n\r\n") {
+        let mut byte = [0u8; 1];
+        if stream.read(&mut byte).await? == 0 || head.len() > 8192 {
+            return Err(failed("proxy closed the CONNECT exchange"));
+        }
+        head.push(byte[0]);
+    }
+    let status = String::from_utf8_lossy(&head);
+    if status.split_whitespace().nth(1) != Some("200") {
+        return Err(failed("proxy refused the channel tunnel"));
+    }
+    Ok(stream)
+}
+
 fn refusal(error: &tokio_tungstenite::tungstenite::Error) -> ChannelEnd {
     match error {
         tokio_tungstenite::tungstenite::Error::Http(response)
@@ -858,10 +1000,10 @@ fn close_code(code: u16) -> ChannelEnd {
         _ => ChannelEnd::Lost,
     }
 }
-/// Reconnect delay: exponential, spread uniformly over [base/2, 3·base/2] so many
-/// executors dropped together do not reconnect together.
+/// Reconnect delay: exponential up to a 20 s base (at most 30 s), spread uniformly over
+/// [base/2, 3·base/2] so many executors dropped together do not reconnect together.
 pub fn channel_backoff(attempt: u32) -> Duration {
-    let base = 250u64 << attempt.min(5);
+    let base = (250u64 << attempt.min(7)).min(20_000);
     Duration::from_millis(base / 2 + rand::random::<u64>() % (base + 1))
 }
 

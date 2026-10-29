@@ -391,6 +391,7 @@ async fn external_teardown_replays_two_large_receipts_individually_before_ready(
         transport::HttpIdentity {
             client: reqwest::Client::new(),
             user_agent: "sikaru-cli/test".into(),
+            proxy: None,
         },
         runtime::RunOptions {
             skip_checkpoints: true,

@@ -144,6 +144,7 @@ impl Processes {
     ) -> Result<Value> {
         self.execute_owned(method, args, journal, None).await
     }
+    #[cfg(test)]
     pub async fn execute_owned(
         &mut self,
         method: &str,
@@ -151,57 +152,75 @@ impl Processes {
         journal: &mut Journal,
         operation_key: Option<&str>,
     ) -> Result<Value> {
-        let result = match method {
-            "bash.run" => self.run(args, journal, operation_key).await,
-            "workspace.write_text" => write_text(args, journal.binding.anchor.path()),
-            "bash.start" => self.start(args, journal, operation_key),
-            "bash.read" => self.read(args, journal),
-            "bash.wait" => self.wait(args, journal).await,
-            "bash.wait_for" => self.wait_for(args, journal).await,
-            "jobs.next_completed" => self.next_completed(args, journal).await,
-            "bash.cancel" => self.cancel(args, journal),
-            _ => bail!("unsupported compute operation"),
-        };
-        process_observation(result)
+        let finish = self.begin(method, args, journal, operation_key).await;
+        finish(self, journal)
     }
-    async fn run(
+    /// Start an operation: its local effects happen now, against the registry. The returned
+    /// future holds no borrow while it waits; its output completes the operation against the
+    /// registry, so concurrent operations apply their effects one at a time.
+    pub fn begin(
         &mut self,
+        method: &str,
+        args: &HashMap<String, Value>,
+        journal: &mut Journal,
+        operation_key: Option<&str>,
+    ) -> Pending {
+        let step = match method {
+            "bash.run" => self.run(args, journal, operation_key),
+            "bash.wait" => self.wait(args, journal),
+            "bash.wait_for" => self.wait_for(args, journal),
+            "jobs.next_completed" => self.next_completed(args, journal),
+            _ => Ok(done(self.immediate(method, args, journal, operation_key))),
+        };
+        let step = step.unwrap_or_else(|error| done(Err(error)));
+        later(step, |finish, p, j| process_observation(finish(p, j)))
+    }
+    fn immediate(
+        &mut self,
+        method: &str,
         args: &HashMap<String, Value>,
         journal: &mut Journal,
         operation_key: Option<&str>,
     ) -> Result<Value> {
+        match method {
+            "workspace.write_text" => write_text(args, journal.binding.anchor.path()),
+            "workspace.edit_text" => edit_text(args, journal.binding.anchor.path()),
+            "bash.start" => self.start(args, journal, operation_key),
+            "bash.read" => self.read(args, journal),
+            "bash.cancel" => self.cancel(args, journal),
+            _ => bail!("unsupported compute operation"),
+        }
+    }
+    fn run(
+        &mut self,
+        args: &HashMap<String, Value>,
+        journal: &mut Journal,
+        operation_key: Option<&str>,
+    ) -> Result<Pending> {
         allowed(args, &["command", "cwd", "env", "yield_seconds", "limit"])?;
-        let seconds = args
-            .get("yield_seconds")
-            .map(|value| value.as_f64().context("yield_seconds must be numeric"))
-            .transpose()?
-            .unwrap_or(1.0);
-        if !seconds.is_finite() || seconds < 0.0 {
-            bail!("invalid yield_seconds");
-        }
-        let limit = integer(args, "limit", 8192)?.min(PAGE_LIMIT as u64);
-        if limit == 0 {
-            bail!("output limit must be positive");
-        }
+        let (seconds, limit) = run_bounds(args)?;
         let mut spawn_args = args.clone();
         spawn_args.remove("yield_seconds");
         spawn_args.remove("limit");
         let state = self.start(&spawn_args, journal, operation_key)?;
         if state["status"] == "error" {
-            return Ok(state);
+            return Ok(done(Ok(state)));
         }
         let handle = state["id"].clone();
         let wait_args = HashMap::from([
             ("handle_id".into(), handle.clone()),
             ("timeout".into(), json!(seconds)),
         ]);
-        self.wait(&wait_args, journal).await?;
         let read_args = HashMap::from([
             ("handle_id".into(), handle),
             ("offset".into(), json!(0)),
             ("limit".into(), json!(limit)),
         ]);
-        self.read(&read_args, journal)
+        let waited = self.wait(&wait_args, journal)?;
+        Ok(later(waited, move |finish, p, j| {
+            finish(p, j)?;
+            p.read(&read_args, j)
+        }))
     }
     fn start(
         &mut self,
@@ -273,22 +292,23 @@ impl Processes {
         };
         read_page(&job.artifact, &job.path, args, state, limit)
     }
-    async fn wait(
-        &mut self,
-        args: &HashMap<String, Value>,
-        journal: &mut Journal,
-    ) -> Result<Value> {
+    fn wait(&mut self, args: &HashMap<String, Value>, journal: &mut Journal) -> Result<Pending> {
         allowed(args, &["handle_id", "timeout"])?;
-        let id = string(args, "handle_id")?;
+        let id = string(args, "handle_id")?.to_owned();
         let until = self.wait_deadline(args.get("timeout"))?;
         self.maintenance(journal)?;
-        self.state(id)?;
+        self.state(&id)?;
         // One wait is served by the exit event itself, bounded by the deadline.
-        if let Some(signal) = self.exit_signal(id) {
-            exited(signal, until).await;
-        }
-        self.maintenance(journal)?;
-        self.state(id)
+        let signal = self.exit_signal(&id);
+        let exit = async move {
+            if let Some(signal) = signal {
+                exited(signal, until).await;
+            }
+        };
+        Ok(later(exit, move |(), p, j| {
+            p.maintenance(j)?;
+            p.state(&id)
+        }))
     }
     /// The requested timeout, clamped by the command deadline.
     fn wait_deadline(&self, timeout: Option<&Value>) -> Result<Instant> {
@@ -310,17 +330,18 @@ impl Processes {
     }
     /// `bash.wait_for`: one call that returns when the first condition fires,
     /// when none can fire any more, or at its single deadline; never an error on the deadline.
-    async fn wait_for(
+    fn wait_for(
         &mut self,
         args: &HashMap<String, Value>,
         journal: &mut Journal,
-    ) -> Result<Value> {
+    ) -> Result<Pending> {
         allowed(args, &["conditions", "timeout"])?;
         let raw = args
             .get("conditions")
             .and_then(Value::as_array)
             .filter(|items| !items.is_empty() && items.len() <= MAX_CONDITIONS)
-            .context("conditions must be a nonempty list")?;
+            .context("conditions must be a nonempty list")?
+            .clone();
         let workspace = journal.binding.anchor.path().to_owned();
         let conditions = raw
             .iter()
@@ -333,25 +354,27 @@ impl Processes {
             .iter()
             .map(|c| self.watcher(c, journal, until))
             .collect::<Result<Vec<_>>>()?;
-        let (outcomes, expired) = watch_until_fired(watchers, until).await;
-        self.maintenance(journal)?;
-        let entries = raw
-            .iter()
-            .zip(&conditions)
-            .zip(outcomes)
-            .map(|((item, condition), outcome)| self.entry(item, condition, outcome, expired))
-            .collect::<Vec<_>>();
-        Ok(json!({"status": wait_status(&entries),
-            "elapsed_seconds": (started.elapsed().as_secs_f64() * 1000.0).round() / 1000.0,
-            "conditions": entries}))
+        let fired = watch_until_fired(watchers, until);
+        Ok(later(fired, move |(outcomes, expired), p, j| {
+            p.maintenance(j)?;
+            let entries = raw
+                .iter()
+                .zip(&conditions)
+                .zip(outcomes)
+                .map(|((item, condition), outcome)| p.entry(item, condition, outcome, expired))
+                .collect::<Vec<_>>();
+            Ok(json!({"status": wait_status(&entries),
+                "elapsed_seconds": (started.elapsed().as_secs_f64() * 1000.0).round() / 1000.0,
+                "conditions": entries}))
+        }))
     }
     /// `jobs.next_completed`: the first of the named processes to finish, as a notice
     /// with the last `tail_bytes` of its output.
-    async fn next_completed(
+    fn next_completed(
         &mut self,
         args: &HashMap<String, Value>,
         journal: &mut Journal,
-    ) -> Result<Value> {
+    ) -> Result<Pending> {
         allowed(args, &["handle_ids", "timeout", "tail_bytes"])?;
         let candidates = handle_ids(args.get("handle_ids"))?;
         let tail = integer(args, "tail_bytes", NOTICE_TAIL_BYTES)?;
@@ -360,16 +383,23 @@ impl Processes {
         }
         let until = self.wait_deadline(args.get("timeout"))?;
         self.maintenance(journal)?;
-        let exits = candidates
+        let watchers = candidates
             .iter()
-            .map(|id| Condition::Exit(id.clone()))
-            .collect::<Vec<_>>();
-        let watchers = exits
-            .iter()
-            .map(|c| self.watcher(c, journal, until))
+            .map(|id| self.watcher(&Condition::Exit(id.clone()), journal, until))
             .collect::<Result<Vec<_>>>()?;
-        let (outcomes, _) = watch_until_fired(watchers, until).await;
-        self.maintenance(journal)?;
+        let fired = watch_until_fired(watchers, until);
+        Ok(later(fired, move |(outcomes, _), p, j| {
+            p.maintenance(j)?;
+            p.first_completed(&candidates, &outcomes, tail, j)
+        }))
+    }
+    fn first_completed(
+        &mut self,
+        candidates: &[String],
+        outcomes: &[Option<Outcome>],
+        tail: u64,
+        journal: &mut Journal,
+    ) -> Result<Value> {
         let first = outcomes
             .iter()
             .position(|o| o.as_ref().is_some_and(Outcome::fired));
@@ -792,6 +822,128 @@ fn write_text(args: &HashMap<String, Value>, workspace: &Path) -> Result<Value> 
     }
 }
 
+fn edit_text(args: &HashMap<String, Value>, workspace: &Path) -> Result<Value> {
+    allowed(args, &["path", "edits"])?;
+    let requested = string(args, "path")?;
+    let edits = edit_pairs(args)?;
+    let path = resolve(workspace, requested);
+    let original = match read_file(&path) {
+        Ok(text) => text,
+        Err(error) => return workspace_error(requested, error),
+    };
+    let edited = match apply_edits(&original, &edits) {
+        Ok(edited) => edited,
+        Err(rejection) => {
+            return Ok(json!({"status":"error", "path":requested, "error":rejection}))
+        }
+    };
+    match write_file(&path, &edited) {
+        Ok(()) => Ok(json!({"edited":true})),
+        Err(error) => workspace_error(requested, error),
+    }
+}
+
+fn edit_pairs(args: &HashMap<String, Value>) -> Result<Vec<(String, String)>> {
+    let items = args
+        .get("edits")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty())
+        .context("edits must be a nonempty list")?;
+    items
+        .iter()
+        .map(|item| {
+            let fields = item.as_object().context("each edit must be an object")?;
+            if fields.len() != 2 {
+                bail!("each edit has exactly old_text and new_text");
+            }
+            let text = |name: &str| {
+                fields
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .context("edit text missing")
+            };
+            Ok((text("old_text")?, text("new_text")?))
+        })
+        .collect()
+}
+
+fn read_file(path: &Path) -> Result<String> {
+    require_regular_file(&std::fs::metadata(path)?)?;
+    Ok(std::fs::read_to_string(path)?)
+}
+
+/// Pi's edit rules: each old text matches the original exactly once, edits never
+/// overlap, and all apply together. Line endings and a UTF-8 BOM are preserved.
+fn apply_edits(original: &str, edits: &[(String, String)]) -> std::result::Result<String, Value> {
+    let (bom, body) = match original.strip_prefix('\u{feff}') {
+        Some(rest) => ("\u{feff}", rest),
+        None => ("", original),
+    };
+    let crlf = body.contains("\r\n");
+    let text = body.replace("\r\n", "\n");
+    let mut spans = Vec::with_capacity(edits.len());
+    for (index, (old, new)) in edits.iter().enumerate() {
+        let old = old.replace("\r\n", "\n");
+        if old.is_empty() {
+            return Err(edit_error("edit_text_empty", Some(index), None));
+        }
+        let mut found = text.match_indices(old.as_str());
+        let Some((start, _)) = found.next() else {
+            return Err(edit_error("edit_text_not_found", Some(index), None));
+        };
+        let others = found.count();
+        if others > 0 {
+            return Err(edit_error(
+                "edit_text_not_unique",
+                Some(index),
+                Some(others + 1),
+            ));
+        }
+        spans.push((start, start + old.len(), new.replace("\r\n", "\n"), index));
+    }
+    spans.sort_by_key(|span| span.0);
+    if let Some(pair) = spans.windows(2).find(|pair| pair[1].0 < pair[0].1) {
+        return Err(edit_error("edits_overlap", Some(pair[1].3), None));
+    }
+    let mut edited = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for (start, end, new, _) in &spans {
+        edited.push_str(&text[cursor..*start]);
+        edited.push_str(new);
+        cursor = *end;
+    }
+    edited.push_str(&text[cursor..]);
+    if edited == text {
+        return Err(edit_error("edit_no_change", None, None));
+    }
+    let edited = if crlf {
+        edited.replace('\n', "\r\n")
+    } else {
+        edited
+    };
+    Ok(format!("{bom}{edited}"))
+}
+
+/// Fixed messages, so the executor never places free text in the model's context.
+fn edit_error(code: &str, index: Option<usize>, occurrences: Option<usize>) -> Value {
+    let message = match code {
+        "edit_text_empty" => "The edit's old_text must not be empty.",
+        "edit_text_not_found" => "Could not find the edit's old_text. It must match exactly, including all whitespace and newlines.",
+        "edit_text_not_unique" => "The edit's old_text occurs more than once. Include more surrounding text to make it unique.",
+        "edits_overlap" => "Edits overlap. Merge nearby changes into one edit.",
+        _ => "No changes made. The replacements produced identical content.",
+    };
+    let mut error = json!({"code":code, "message":message});
+    if let Some(index) = index {
+        error["edit_index"] = json!(index);
+    }
+    if let Some(occurrences) = occurrences {
+        error["occurrences"] = json!(occurrences);
+    }
+    error
+}
+
 fn workspace_error(path: &str, error: anyhow::Error) -> Result<Value> {
     use std::io::ErrorKind;
     let observation = error
@@ -814,6 +966,7 @@ fn workspace_error(path: &str, error: anyhow::Error) -> Result<Value> {
                 "unsupported_file_type",
                 "The requested path must be a regular file.",
             )),
+            ErrorKind::InvalidData => Some(("not_utf8_text", "The file is not UTF-8 text.")),
             _ => None,
         });
     match observation {
@@ -1023,6 +1176,43 @@ async fn exited(mut signal: watch::Receiver<bool>, until: Instant) {
 }
 
 type Watcher = std::pin::Pin<Box<dyn std::future::Future<Output = Outcome> + Send>>;
+
+/// `bash.run`'s yield seconds and output limit.
+fn run_bounds(args: &HashMap<String, Value>) -> Result<(f64, u64)> {
+    let seconds = args
+        .get("yield_seconds")
+        .map(|value| value.as_f64().context("yield_seconds must be numeric"))
+        .transpose()?
+        .unwrap_or(1.0);
+    if !seconds.is_finite() || seconds < 0.0 {
+        bail!("invalid yield_seconds");
+    }
+    let limit = integer(args, "limit", 8192)?.min(PAGE_LIMIT as u64);
+    if limit == 0 {
+        bail!("output limit must be positive");
+    }
+    Ok((seconds, limit))
+}
+/// The step that completes an operation against the registry once its wait is over.
+pub type Finish = Box<dyn FnOnce(&mut Processes, &mut Journal) -> Result<Value> + Send>;
+/// An operation's remaining wait. It borrows nothing, so operations wait concurrently.
+pub type Pending = std::pin::Pin<Box<dyn std::future::Future<Output = Finish> + Send>>;
+/// An operation that needs no wait.
+fn done(result: Result<Value>) -> Pending {
+    Box::pin(std::future::ready(
+        Box::new(move |_: &mut Processes, _: &mut Journal| result) as Finish,
+    ))
+}
+/// Await `wait` without the registry, then complete with its output against the registry.
+fn later<T: Send + 'static>(
+    wait: impl std::future::Future<Output = T> + Send + 'static,
+    finish: impl FnOnce(T, &mut Processes, &mut Journal) -> Result<Value> + Send + 'static,
+) -> Pending {
+    Box::pin(async move {
+        let value = wait.await;
+        Box::new(move |p: &mut Processes, j: &mut Journal| finish(value, p, j)) as Finish
+    })
+}
 
 /// One condition's result: `observed` when it fired, otherwise why not.
 #[derive(Clone)]

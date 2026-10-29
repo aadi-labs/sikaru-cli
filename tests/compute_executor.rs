@@ -118,6 +118,9 @@ mod wire {
         ready_body: Option<Value>,
         http_receipts: usize,
         http_user_agents: Vec<String>,
+        failed_receipts: Vec<Value>,
+        burst: usize,
+        refused_at: Vec<std::time::Instant>,
         channel: ChannelState,
     }
     /// What the fake gateway saw on its executor channel endpoint.
@@ -133,6 +136,8 @@ mod wire {
         arrivals: Vec<std::time::SystemTime>,
         resend: Option<Value>,
         switched: bool,
+        /// A second operation has been pushed alongside the still-running first.
+        second_pushed: bool,
     }
     #[derive(Clone)]
     struct Oracle {
@@ -251,12 +256,61 @@ mod wire {
                 return Some(ResponseTemplate::new(401));
             }
             match (self.scenario, path.rsplit('/').next().unwrap()) {
-                ("uploadfail", "receipts") => {
-                    if s.receipts.is_empty() {
-                        s.receipts.push(body.clone());
-                    } else {
-                        assert_eq!(&s.receipts[0], body);
+                // More consecutive receipt failures than any fixed retry count.
+                ("uploadfail", "receipts") if s.failed_receipts.len() < 6 => {
+                    if let Some(first) = s.failed_receipts.first() {
+                        assert_eq!(first, body);
                     }
+                    s.failed_receipts.push(body.clone());
+                    Some(ResponseTemplate::new(503))
+                }
+                // The service will never record the first receipt (a warm call that never parked).
+                ("receipt_conflict", "receipts") if s.stage == 0 => {
+                    s.handle = body["payload"]["id"].as_str().unwrap().into();
+                    s.failed_receipts.push(body.clone());
+                    s.receipts.push(body.clone());
+                    s.stage = 1;
+                    Some(ResponseTemplate::new(409).set_body_json(json!({"detail":"conflict"})))
+                }
+                // The first receipt is acknowledged without reaching the ledger; the operation has
+                // since been issued durably, so the reconnecting executor must replay it.
+                ("acked_issued", "receipts") if s.stage == 0 => {
+                    s.handle = body["payload"]["id"].as_str().unwrap().into();
+                    s.failed_receipts.push(body.clone());
+                    s.stage = 1;
+                    Some(ResponseTemplate::new(409).set_body_json(json!({"detail":"conflict"})))
+                }
+                ("acked_issued", "receipts") if body["tool_call_id"] == format!("{0:0128}", 0) => {
+                    s.order.push(if s.ready {
+                        "replay_after_ready"
+                    } else {
+                        "replay"
+                    });
+                    s.receipts.push(body.clone());
+                    Some(ok(
+                        json!({"created":true,"tool_call_id":body["tool_call_id"]}),
+                    ))
+                }
+                // The connection drops once the refused receipt's operation is issued.
+                ("acked_issued", "work") if s.ready && s.stage == 1 && !s.lost_issued => {
+                    s.lost_issued = true;
+                    Some(ResponseTemplate::new(503))
+                }
+                // The service cannot reconcile an issued operation whose result it never recorded.
+                ("acked_issued", "reconcile") if s.lost_issued && s.receipts.is_empty() => Some(
+                    ResponseTemplate::new(409).set_body_json(json!({"detail":"issued_unresolved"})),
+                ),
+                // Every receipt is refused while the service keeps issuing the same operation.
+                ("refusal_loop", "receipts") => {
+                    s.failed_receipts.push(body.clone());
+                    s.refused_at.push(std::time::Instant::now());
+                    Some(ResponseTemplate::new(409).set_body_json(json!({"detail":"conflict"})))
+                }
+                // After the first receipt, a 5xx burst across the poll and every reconnect step.
+                ("transient_burst", "work" | "connect" | "reconcile" | "ready")
+                    if s.stage >= 1 && s.burst < 6 =>
+                {
+                    s.burst += 1;
                     Some(ResponseTemplate::new(503))
                 }
                 ("late", "ready") => {
@@ -365,7 +419,7 @@ mod wire {
             if self.scenario == "hang" {
                 return ok(page).set_delay(Duration::from_secs(2));
             }
-            if s.stage >= self.final_stage() {
+            if self.finished(s) {
                 return self.completed_work(page);
             }
             if self.withholds_operation(s) {
@@ -985,22 +1039,106 @@ mod wire {
         );
     }
     #[tokio::test]
-    async fn receipt_upload_failure_retains_immutable_result_without_reexecution() {
+    async fn receipt_upload_failures_retry_the_immutable_result_without_reexecution() {
         let (root, _server, oracle, child) = launch("uploadfail").await;
-        let output = result(child).await;
-        assert_eq!(output.status.code(), Some(4));
-        assert_eq!(oracle.state.lock().unwrap().receipts.len(), 1);
+        completed(&result(child).await);
+        {
+            let s = oracle.state.lock().unwrap();
+            assert_eq!(s.failed_receipts.len(), 6);
+            assert_eq!(
+                s.receipts[0], s.failed_receipts[0],
+                "the same receipt, retried"
+            );
+            assert_eq!(s.receipts.len(), 4);
+        }
         let journal = std::fs::read_to_string(root.path().join("state/journal.jsonl")).unwrap();
         let receipts = journal
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
             .filter(|v| v["record"] == "Receipt")
             .count();
-        assert_eq!(receipts, 1);
+        assert_eq!(receipts, 4, "one immutable receipt per operation");
         assert_eq!(
             std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
             "once\n"
         );
+    }
+    #[tokio::test]
+    async fn a_refused_receipt_settles_delivery_without_retry_or_reexecution() {
+        let (root, _server, oracle, child) = launch("receipt_conflict").await;
+        completed(&result(child).await);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
+            "once\n"
+        );
+        let s = oracle.state.lock().unwrap();
+        assert_eq!(
+            s.failed_receipts.len(),
+            1,
+            "a refused receipt is never re-sent"
+        );
+        assert_eq!(s.receipts.len(), 4);
+    }
+    #[tokio::test]
+    async fn a_receipt_refused_while_reissued_ends_the_run_after_paced_refusals() {
+        let (_root, _server, oracle, child) = launch("refusal_loop").await;
+        let output = result(child).await;
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["status"], "recovery_required", "{value}");
+        assert_eq!(
+            value["reason"],
+            "receipt_delivery_failed: immutable receipt retained"
+        );
+        assert_eq!(value["cleanup"], "confirmed", "{value}");
+        let s = oracle.state.lock().unwrap();
+        assert_eq!(
+            s.failed_receipts.len(),
+            3,
+            "the run gives up after 3 refusals"
+        );
+        assert!(s.failed_receipts.iter().all(|r| r == &s.failed_receipts[0]));
+        let paced = s.refused_at[2].duration_since(s.refused_at[0]);
+        assert!(
+            paced >= Duration::from_millis(1800),
+            "refusals at the idle pace: {paced:?}"
+        );
+    }
+    #[tokio::test]
+    async fn an_acknowledged_receipt_for_an_issued_operation_is_replayed_on_reconnect() {
+        let (root, _server, oracle, child) = launch("acked_issued").await;
+        completed(&result(child).await);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
+            "once\n"
+        );
+        let s = oracle.state.lock().unwrap();
+        assert!(s.lost_issued, "the connection dropped after the refusal");
+        assert_eq!(
+            s.order,
+            vec!["replay", "cleanup"],
+            "replayed once, while reconnecting"
+        );
+        assert_eq!(
+            s.receipts[0], s.failed_receipts[0],
+            "the same immutable receipt"
+        );
+        assert!(s
+            .reconciliations
+            .iter()
+            .all(|r| r["uncertain_operation_ids"] == json!([])));
+        assert_eq!(s.receipts.len(), 4);
+    }
+    #[tokio::test]
+    async fn transient_failures_on_poll_and_reconnect_do_not_end_the_run() {
+        let (root, _server, oracle, child) = launch("transient_burst").await;
+        completed(&result(child).await);
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
+            "once\n"
+        );
+        let s = oracle.state.lock().unwrap();
+        assert_eq!(s.burst, 6, "the whole burst was absorbed");
+        assert_eq!(s.receipts.len(), 4);
     }
     #[tokio::test]
     async fn missing_poll_response_reports_issued_uncertainty_without_running_it() {
@@ -1149,7 +1287,39 @@ mod wire {
                     }
                 };
                 send(&mut sink, operations(first)).await;
-                while let Some(Ok(message)) = stream.next().await {
+                if self.scenario == "channel_duplicate" {
+                    // The same operation again while the first delivery is still running.
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    let again = {
+                        let mut s = self.state.lock().unwrap();
+                        let op = self.channel_operation(&s);
+                        self.page_with(&mut s, op)
+                    };
+                    send(&mut sink, operations(again)).await;
+                }
+                if self.scenario == "channel_concurrent" {
+                    // A second warm call arrives while the first is still running.
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    let both = {
+                        let mut s = self.state.lock().unwrap();
+                        s.channel.second_pushed = true;
+                        self.unanswered_page(&mut s)
+                    };
+                    send(&mut sink, operations(both)).await;
+                }
+                // Like the gateway, heartbeat while waiting: the executor treats silence as loss.
+                let mut beat = tokio::time::interval(Duration::from_millis(300));
+                loop {
+                    let message = tokio::select! {
+                        message = stream.next() => message,
+                        _ = beat.tick() => {
+                            send(&mut sink, json!({"type":"heartbeat"})).await;
+                            continue;
+                        }
+                    };
+                    let Some(Ok(message)) = message else {
+                        return;
+                    };
                     let Message::Text(text) = message else {
                         continue;
                     };
@@ -1211,7 +1381,9 @@ mod wire {
                 s.channel.switched |= close;
                 let frame = json!({"type":"receipt_accepted","run_id":body["run_id"],
                     "receipt":{"tool_call_id":body["tool_call_id"],"created":created,"status":"accepted"}});
-                let next = (!close).then(|| self.channel_page(&mut s));
+                // A duplicate delivery is answered before the turn moves on.
+                let hold = self.scenario == "channel_duplicate" && created;
+                let next = (!close && !hold).then(|| self.channel_page(&mut s));
                 Reply::Accept { frame, next, close }
             }
             fn channel_page(&self, s: &mut State) -> Value {
@@ -1225,8 +1397,45 @@ mod wire {
                 if self.scenario == "channel_signal" && s.stage >= 1 {
                     return page;
                 }
+                if self.scenario == "channel_concurrent" {
+                    return self.unanswered_page(s);
+                }
                 let op = self.channel_operation(s);
                 self.page_with(s, op)
+            }
+            /// Every pushed operation without a recorded receipt, as the gateway repeats them.
+            fn unanswered_page(&self, s: &mut State) -> Value {
+                let long = operation(
+                    0,
+                    "bash.run",
+                    json!({"command":"sleep 3; echo once >> long","yield_seconds":10,"limit":8192}),
+                );
+                let quick = operation(
+                    1,
+                    "bash.run",
+                    json!({"command":"echo once >> quick","yield_seconds":5,"limit":8192}),
+                );
+                let pushed = match s.channel.second_pushed {
+                    true => vec![long, quick],
+                    false => vec![long],
+                };
+                let unanswered = pushed
+                    .into_iter()
+                    .filter(|op| {
+                        !s.receipts
+                            .iter()
+                            .any(|r| r["tool_call_id"] == op["tool_call_id"])
+                    })
+                    .collect::<Vec<_>>();
+                for op in &unanswered {
+                    s.channel
+                        .operations_sent
+                        .push(op["tool_call_id"].as_str().unwrap().into());
+                }
+                let mut page = running_page();
+                page["transport"] = json!("channel");
+                page["operations"] = json!(unanswered);
+                page
             }
             fn page_with(&self, s: &mut State, op: Value) -> Value {
                 s.channel
@@ -1243,6 +1452,11 @@ mod wire {
                         0,
                         "bash.run",
                         json!({"command":"sleep 20; touch finished","yield_seconds":30,"limit":8192}),
+                    ),
+                    ("channel_duplicate", _) => operation(
+                        0,
+                        "bash.run",
+                        json!({"command":"sleep 1; echo once >> effect","yield_seconds":5,"limit":8192}),
                     ),
                     ("channel_signal", _) => operation(
                         0,
@@ -1282,9 +1496,15 @@ mod wire {
         fn channel_serves_operations(&self, s: &State) -> bool {
             self.channel_scenario() && self.scenario != "channel_refused" && !s.channel.switched
         }
+        fn finished(&self, s: &State) -> bool {
+            // A refused receipt never clears: the turn never finishes while it is refused.
+            s.refused_at.is_empty() && s.stage >= self.final_stage()
+        }
         fn final_stage(&self) -> usize {
-            if self.scenario == "channel_long" {
+            if matches!(self.scenario, "channel_long" | "channel_duplicate") {
                 1
+            } else if self.scenario == "channel_concurrent" {
+                2
             } else {
                 4
             }
@@ -1360,15 +1580,41 @@ mod wire {
         );
     }
     #[tokio::test]
-    async fn refused_channel_falls_back_to_polling_after_three_attempts() {
-        let (root, _server, oracle, child) = launch("channel_refused").await;
+    async fn duplicate_delivery_of_a_running_operation_runs_once_and_answers_both() {
+        let (root, _server, oracle, child) = launch("channel_duplicate").await;
         completed(&result(child).await);
         assert_eq!(
             std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
             "once\n"
         );
         let s = oracle.state.lock().unwrap();
-        assert_eq!(s.channel.refusals, 3);
+        assert_eq!(s.channel.operations_sent.len(), 2);
+        assert_eq!(s.channel.operations_sent[0], s.channel.operations_sent[1]);
+        assert_eq!(s.channel.receipts.len(), 2, "both deliveries are answered");
+        assert_eq!(s.channel.receipts[0], s.channel.receipts[1]);
+        assert_eq!(s.receipts.len(), 1);
+    }
+    #[tokio::test]
+    async fn refused_channel_falls_back_to_polling() {
+        let (root, _server, oracle, child) = launch("channel_refused").await;
+        let output = result(child).await;
+        completed(&output);
+        let fallbacks = git_remote::json_events(&output.stderr)
+            .into_iter()
+            .filter(|e| e["event"] == "executor_transport")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            fallbacks,
+            vec![
+                json!({"event":"executor_transport","transport":"poll","reason":"channel_unavailable"})
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("workspace/effect")).unwrap(),
+            "once\n"
+        );
+        let s = oracle.state.lock().unwrap();
+        assert!(s.channel.refusals >= 1);
         assert_eq!(s.receipts.len(), 4);
         assert!(s.http_receipts >= 4);
     }
@@ -1425,6 +1671,40 @@ mod wire {
         assert!(root.path().join("workspace/started").exists());
         tokio::time::sleep(Duration::from_millis(2200)).await;
         assert!(!root.path().join("workspace/escaped").exists());
+    }
+    #[tokio::test]
+    async fn an_operation_pushed_during_a_long_command_is_answered_before_it_finishes() {
+        let (root, _server, oracle, child) = launch("channel_concurrent").await;
+        completed(&result(child).await);
+        let workspace = root.path().join("workspace");
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("long")).unwrap(),
+            "once\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("quick")).unwrap(),
+            "once\n"
+        );
+        let s = oracle.state.lock().unwrap();
+        let order = s
+            .receipts
+            .iter()
+            .map(|r| r["tool_call_id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            order,
+            vec![format!("{:0128}", 1), format!("{:0128}", 0)],
+            "the second operation's receipt arrives while the first still runs"
+        );
+        let mut long_receipts = s
+            .channel
+            .receipts
+            .iter()
+            .filter(|r| r["tool_call_id"] == format!("{:0128}", 0));
+        assert!(
+            long_receipts.all(|r| r == &s.receipts[1]),
+            "a repeat of the running operation gets the same receipt"
+        );
     }
     #[tokio::test]
     async fn long_command_is_answered_once_and_its_receipt_follows_exit_promptly() {
